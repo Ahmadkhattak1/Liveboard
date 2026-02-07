@@ -23,16 +23,18 @@ export default function BoardPage({
   );
 }
 
-<div className={styles.page}>
+function BoardView({ boardId }: { boardId: string }) {
+  return (
+    <div className={styles.page}>
 
 
-  {/* Toolbar */}
-  <Toolbar />
+      {/* Toolbar */}
+      <Toolbar />
 
-  {/* Canvas */}
-  <main className={styles.main}>
-    <Canvas />
-  </main>
-</div>
+      {/* Canvas */}
+      <main className={styles.main}>
+        <Canvas />
+      </main>
+    </div>
   );
 }

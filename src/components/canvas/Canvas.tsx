@@ -109,8 +109,8 @@ export function Canvas() {
 
         const handleHandMouseDown = (e: fabric.TPointerEventInfo<fabric.TPointerEvent>) => {
           isHandPanning = true;
-          lastX = e.e.clientX;
-          lastY = e.e.clientY;
+          lastX = (e.e as any).clientX;
+          lastY = (e.e as any).clientY;
           canvas.defaultCursor = 'grabbing';
           canvas.hoverCursor = 'grabbing';
         };
@@ -119,11 +119,11 @@ export function Canvas() {
           if (isHandPanning) {
             const vpt = canvas.viewportTransform;
             if (vpt) {
-              vpt[4] += e.e.clientX - lastX;
-              vpt[5] += e.e.clientY - lastY;
+              vpt[4] += (e.e as any).clientX - lastX;
+              vpt[5] += (e.e as any).clientY - lastY;
               canvas.requestRenderAll();
-              lastX = e.e.clientX;
-              lastY = e.e.clientY;
+              lastX = (e.e as any).clientX;
+              lastY = (e.e as any).clientY;
             }
           }
         };
@@ -261,8 +261,8 @@ export function Canvas() {
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if ((event.key === 'Delete' || event.key === 'Backspace') &&
-          document.activeElement?.tagName !== 'INPUT' &&
-          document.activeElement?.tagName !== 'TEXTAREA') {
+        document.activeElement?.tagName !== 'INPUT' &&
+        document.activeElement?.tagName !== 'TEXTAREA') {
         event.preventDefault();
 
         const activeObjects = canvas.getActiveObjects();
@@ -289,11 +289,11 @@ export function Canvas() {
 
     const handleMiddleMouseDown = (e: fabric.TPointerEventInfo<fabric.TPointerEvent>) => {
       // Check if middle mouse button (button 1)
-      if (e.e.button === 1) {
+      if ((e.e as any).button === 1) {
         e.e.preventDefault();
         middleMousePanningRef.current = true;
-        lastPosXRef.current = e.e.clientX;
-        lastPosYRef.current = e.e.clientY;
+        lastPosXRef.current = (e.e as any).clientX;
+        lastPosYRef.current = (e.e as any).clientY;
         canvas.selection = false;
         if (containerRef.current) {
           containerRef.current.classList.add(styles.panning);
@@ -305,17 +305,17 @@ export function Canvas() {
       if (middleMousePanningRef.current) {
         const vpt = canvas.viewportTransform;
         if (vpt) {
-          vpt[4] += e.e.clientX - lastPosXRef.current;
-          vpt[5] += e.e.clientY - lastPosYRef.current;
+          vpt[4] += (e.e as any).clientX - lastPosXRef.current;
+          vpt[5] += (e.e as any).clientY - lastPosYRef.current;
           canvas.requestRenderAll();
-          lastPosXRef.current = e.e.clientX;
-          lastPosYRef.current = e.e.clientY;
+          lastPosXRef.current = (e.e as any).clientX;
+          lastPosYRef.current = (e.e as any).clientY;
         }
       }
     };
 
     const handleMiddleMouseUp = (e: fabric.TPointerEventInfo<fabric.TPointerEvent>) => {
-      if (e.e.button === 1 && middleMousePanningRef.current) {
+      if ((e.e as any).button === 1 && middleMousePanningRef.current) {
         middleMousePanningRef.current = false;
         canvas.selection = activeTool !== 'pen' && activeTool !== 'hand';
         if (containerRef.current) {
@@ -352,8 +352,8 @@ export function Canvas() {
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.code === 'Space' &&
-          document.activeElement?.tagName !== 'INPUT' &&
-          document.activeElement?.tagName !== 'TEXTAREA') {
+        document.activeElement?.tagName !== 'INPUT' &&
+        document.activeElement?.tagName !== 'TEXTAREA') {
         event.preventDefault();
         spacebarPressedRef.current = true;
         canvas.defaultCursor = 'grab';
@@ -380,8 +380,8 @@ export function Canvas() {
       if (spacebarPressedRef.current) {
         isPanningRef.current = true;
         canvas.selection = false;
-        lastPosXRef.current = event.e.clientX;
-        lastPosYRef.current = event.e.clientY;
+        lastPosXRef.current = (event.e as any).clientX;
+        lastPosYRef.current = (event.e as any).clientY;
       }
     };
 
@@ -390,11 +390,11 @@ export function Canvas() {
         const e = event.e;
         const vpt = canvas.viewportTransform;
         if (vpt) {
-          vpt[4] += e.clientX - lastPosXRef.current;
-          vpt[5] += e.clientY - lastPosYRef.current;
+          vpt[4] += (e as any).clientX - lastPosXRef.current;
+          vpt[5] += (e as any).clientY - lastPosYRef.current;
           canvas.requestRenderAll();
-          lastPosXRef.current = e.clientX;
-          lastPosYRef.current = e.clientY;
+          lastPosXRef.current = (e as any).clientX;
+          lastPosYRef.current = (e as any).clientY;
         }
       }
     };

@@ -8,7 +8,7 @@ export default function NotFound() {
       <div className={styles.emoji}>🔍</div>
       <h1 className={styles.title}>Board Not Found</h1>
       <p className={styles.message}>
-        The board you're looking for doesn't exist or has been deleted.
+        The board you&apos;re looking for doesn&apos;t exist or has been deleted.
       </p>
       <Link href="/">
         <Button>Create New Board</Button>
