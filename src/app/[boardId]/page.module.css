@@ -1,0 +1,54 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg);
+}
+
+/* RemoteOk-style header */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 24px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.logo {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+  letter-spacing: -0.3px;
+}
+
+.boardId {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+  padding: 4px 10px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-pill);
+  background: var(--bg-secondary);
+}
+
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Main content area */
+.main {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  background: var(--bg-secondary);
+}

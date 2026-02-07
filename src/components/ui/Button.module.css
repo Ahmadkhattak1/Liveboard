@@ -1,0 +1,81 @@
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 20px;
+  font-size: 14px;
+  font-weight: 400;
+  border-radius: var(--radius-pill);
+  transition: all var(--transition);
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Sizes */
+.sm {
+  padding: 6px 14px;
+  font-size: 13px;
+}
+
+.md {
+  padding: 8px 20px;
+  font-size: 14px;
+}
+
+.lg {
+  padding: 10px 24px;
+  font-size: 15px;
+}
+
+/* Variants - RemoteOk style (all outlined) */
+.primary {
+  background: var(--text);
+  color: var(--bg);
+  border-color: var(--text);
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.secondary {
+  background: var(--bg);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.secondary:hover:not(:disabled) {
+  background: var(--bg-secondary);
+  border-color: var(--text);
+}
+
+.ghost {
+  background: transparent;
+  color: var(--text);
+  border-color: transparent;
+}
+
+.ghost:hover:not(:disabled) {
+  background: var(--bg-secondary);
+  border-color: var(--border);
+}
+
+.danger {
+  background: #dc3545;
+  color: white;
+  border-color: #dc3545;
+}
+
+.danger:hover:not(:disabled) {
+  background: #c82333;
+  border-color: #c82333;
+}

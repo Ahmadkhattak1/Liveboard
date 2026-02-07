@@ -1,0 +1,49 @@
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg);
+  font-size: 13px;
+  font-weight: 400;
+  white-space: nowrap;
+  transition: all var(--transition);
+  cursor: default;
+}
+
+.chip.clickable {
+  cursor: pointer;
+}
+
+.chip.clickable:hover {
+  background: var(--bg-secondary);
+  border-color: var(--text);
+}
+
+.emoji {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.removeButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 4px;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-muted);
+  transition: all var(--transition);
+}
+
+.removeButton:hover {
+  color: var(--text);
+  background: var(--bg-secondary);
+}

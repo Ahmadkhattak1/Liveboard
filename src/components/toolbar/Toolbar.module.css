@@ -1,0 +1,263 @@
+/* Miro-style left sidebar toolbar */
+.toolbar {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 60px;
+  background: var(--bg);
+  border-right: 1px solid var(--border-light);
+  display: flex;
+  flex-direction: column;
+  padding: 80px 8px 16px 8px;
+  gap: 8px;
+  z-index: 100;
+}
+
+/* Tool buttons */
+.toolButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  cursor: pointer;
+  transition: all var(--transition);
+  position: relative;
+}
+
+.toolButton:hover {
+  background: var(--bg-secondary);
+}
+
+.toolButton.active {
+  background: var(--text);
+}
+
+.toolButton.active .emoji {
+  filter: invert(1);
+}
+
+.emoji {
+  font-size: 24px;
+  line-height: 1;
+}
+
+/* Tooltip on hover */
+.toolButton::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 100%;
+  margin-left: 12px;
+  padding: 6px 12px;
+  background: var(--text);
+  color: var(--bg);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition);
+}
+
+.toolButton:hover::after {
+  opacity: 1;
+}
+
+/* Divider */
+.divider {
+  width: 100%;
+  height: 1px;
+  background: var(--border-light);
+  margin: 8px 0;
+}
+
+/* Properties panel (floating) */
+.propertiesPanel {
+  position: fixed;
+  bottom: 24px;
+  left: 80px;
+  background: var(--bg);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-shadow: var(--shadow-md);
+  z-index: 90;
+  min-width: 240px;
+}
+
+.propertiesPanel.hidden {
+  display: none;
+}
+
+.propertySection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.propertyLabel {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Color picker grid */
+.colorGrid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+}
+
+.colorButton {
+  width: 32px;
+  height: 32px;
+  border: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition);
+  position: relative;
+}
+
+.colorButton:hover {
+  transform: scale(1.1);
+}
+
+.colorButton.active {
+  border-color: var(--text);
+  transform: scale(1.15);
+}
+
+.colorButton.active::after {
+  content: '✓';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: white;
+  font-size: 16px;
+  font-weight: bold;
+  text-shadow: 0 0 2px rgba(0,0,0,0.5);
+}
+
+/* Stroke width slider */
+.sliderContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sliderValue {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.slider {
+  width: 100%;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--border);
+  outline: none;
+  border-radius: 2px;
+}
+
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--text);
+  cursor: pointer;
+  border: 3px solid var(--bg);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--text);
+  cursor: pointer;
+  border: 3px solid var(--bg);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+/* Zoom controls (bottom right like Miro) */
+.zoomControls {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  display: flex;
+  gap: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  padding: 8px;
+  box-shadow: var(--shadow-md);
+  z-index: 90;
+}
+
+.zoomButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  font-size: 18px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.zoomButton:hover {
+  background: var(--bg-secondary);
+}
+
+.zoomDisplay {
+  min-width: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  font-family: monospace;
+}
+
+/* Mobile hide */
+@media (max-width: 768px) {
+  .toolbar {
+    width: 52px;
+    padding: 70px 4px 12px 4px;
+  }
+
+  .toolButton {
+    width: 40px;
+    height: 40px;
+  }
+
+  .emoji {
+    font-size: 20px;
+  }
+
+  .propertiesPanel {
+    left: 60px;
+    min-width: 200px;
+  }
+}

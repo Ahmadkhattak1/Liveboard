@@ -1,0 +1,296 @@
+/* RemoteOk.com exact visual style */
+
+:root {
+  /* Colors - very minimal like RemoteOk */
+  --bg: #ffffff;
+  --bg-secondary: #fafafa;
+  --border: #d0d0d0;
+  --border-light: #e8e8e8;
+  --text: #000000;
+  --text-secondary: #666666;
+  --text-muted: #999999;
+  --accent: #000000;
+  --accent-hover: #333333;
+
+  /* Spacing - generous like RemoteOk */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 24px;
+  --spacing-2xl: 32px;
+
+  /* Border radius - pill shapes */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-pill: 999px;
+
+  /* Transitions */
+  --transition: 0.15s ease;
+}
+
+/* Dark mode - RemoteOk style */
+.dark {
+  --bg: #0a0a0a;
+  --bg-secondary: #1a1a1a;
+  --border: #333333;
+  --border-light: #2a2a2a;
+  --text: #ffffff;
+  --text-secondary: #999999;
+  --text-muted: #666666;
+  --accent: #ffffff;
+  --accent-hover: #e0e0e0;
+}
+
+/* Reset */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--text);
+  background-color: var(--bg);
+  transition: background-color var(--transition), color var(--transition);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Typography */
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 0;
+}
+
+h1 { font-size: 24px; }
+h2 { font-size: 20px; }
+h3 { font-size: 18px; }
+h4 { font-size: 16px; }
+
+p {
+  margin: 0;
+}
+
+a {
+  color: var(--text);
+  text-decoration: none;
+  transition: opacity var(--transition);
+}
+
+a:hover {
+  opacity: 0.7;
+}
+
+/* Button base - RemoteOk style (pill with outline) */
+button {
+  font-family: inherit;
+  font-size: inherit;
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 0;
+  margin: 0;
+  transition: all var(--transition);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+/* Input base */
+input, textarea {
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--text);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  transition: border-color var(--transition);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+}
+
+input:focus, textarea:focus {
+  outline: none;
+  border-color: var(--text);
+}
+
+input::placeholder, textarea::placeholder {
+  color: var(--text-muted);
+}
+
+/* Selection */
+::selection {
+  background-color: var(--text);
+  color: var(--bg);
+}
+
+/* Scrollbar - RemoteOk style */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: var(--radius-sm);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
+
+/* Focus visible */
+*:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+
+/* Utility classes */
+.container {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 var(--spacing-xl);
+}
+
+.flex {
+  display: flex;
+}
+
+.flex-col {
+  display: flex;
+  flex-direction: column;
+}
+
+.items-center {
+  align-items: center;
+}
+
+.justify-center {
+  justify-content: center;
+}
+
+.justify-between {
+  justify-content: space-between;
+}
+
+.gap-xs { gap: var(--spacing-xs); }
+.gap-sm { gap: var(--spacing-sm); }
+.gap-md { gap: var(--spacing-md); }
+.gap-lg { gap: var(--spacing-lg); }
+
+.text-center {
+  text-align: center;
+}
+
+.text-secondary {
+  color: var(--text-secondary);
+}
+
+.text-muted {
+  color: var(--text-muted);
+}
+
+/* Layout helpers */
+.full-height {
+  min-height: 100vh;
+}
+
+.page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* RemoteOk-style pill/tag */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg);
+  font-size: 14px;
+  font-weight: 400;
+  white-space: nowrap;
+  transition: all var(--transition);
+  cursor: pointer;
+}
+
+.pill:hover {
+  background: var(--bg-secondary);
+  border-color: var(--text);
+}
+
+.pill.active {
+  background: var(--text);
+  color: var(--bg);
+  border-color: var(--text);
+}
+
+/* RemoteOk-style card */
+.card {
+  background: var(--bg);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-xl);
+  transition: border-color var(--transition);
+}
+
+.card:hover {
+  border-color: var(--border);
+}
+
+/* Animations */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s ease;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.2s ease;
+}
+
+/* Canvas container */
+.canvas-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: var(--bg);
+}
