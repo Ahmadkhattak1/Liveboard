@@ -1,10 +1,11 @@
 'use client';
 
-import React, { createContext, useContext, useState, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import * as fabric from 'fabric';
 import { ToolType } from '@/types/canvas';
 import { DEFAULT_STROKE_COLOR, DEFAULT_FILL_COLOR } from '@/lib/constants/colors';
 import { DEFAULT_STROKE_WIDTH } from '@/lib/constants/tools';
+import { CONNECTOR_HISTORY_PROPS } from '@/lib/canvas/connectors';
 
 interface CanvasContextType {
   canvas: fabric.Canvas | null;
@@ -17,6 +18,8 @@ interface CanvasContextType {
   setFillColor: (color: string) => void;
   strokeWidth: number;
   setStrokeWidth: (width: number) => void;
+  pressureSimulation: boolean;
+  setPressureSimulation: (enabled: boolean) => void;
   zoom: number;
   setZoom: (zoom: number) => void;
   undo: () => void;
@@ -27,58 +30,151 @@ interface CanvasContextType {
 
 const CanvasContext = createContext<CanvasContextType | undefined>(undefined);
 
+const HISTORY_DEBOUNCE_MS = 140;
+const HISTORY_LIMIT = 120;
+const CANVAS_HISTORY_PROPS = [
+  'id',
+  'createdBy',
+  'createdAt',
+  'updatedAt',
+  'updatedBy',
+  'stickyNoteId',
+  'stickyRole',
+  'stickyHasPlaceholder',
+  ...CONNECTOR_HISTORY_PROPS,
+];
+
+function serializeCanvasState(canvas: fabric.Canvas): string {
+  const serializer = canvas as fabric.Canvas & {
+    toJSON: (propertiesToInclude?: string[]) => unknown;
+  };
+  return JSON.stringify(serializer.toJSON(CANVAS_HISTORY_PROPS));
+}
+
 export function CanvasProvider({ children }: { children: React.ReactNode }) {
   const [canvas, setCanvas] = useState<fabric.Canvas | null>(null);
   const [activeTool, setActiveTool] = useState<ToolType>('select');
   const [strokeColor, setStrokeColor] = useState(DEFAULT_STROKE_COLOR);
   const [fillColor, setFillColor] = useState(DEFAULT_FILL_COLOR);
   const [strokeWidth, setStrokeWidth] = useState(DEFAULT_STROKE_WIDTH);
+  const [pressureSimulation, setPressureSimulation] = useState(true);
   const [zoom, setZoom] = useState(1);
 
   // Undo/Redo state
   const [undoStack, setUndoStack] = useState<string[]>([]);
   const [redoStack, setRedoStack] = useState<string[]>([]);
-  const canUndo = undoStack.length > 0;
+  const canUndo = undoStack.length > 1;
   const canRedo = redoStack.length > 0;
+  const snapshotTimerRef = useRef<number | null>(null);
+  const isRestoringHistoryRef = useRef(false);
+  const lastSnapshotRef = useRef<string | null>(null);
 
-  // Save canvas state to undo stack
-  const saveState = React.useCallback(() => {
+  const clearSnapshotTimer = React.useCallback(() => {
+    if (snapshotTimerRef.current !== null) {
+      window.clearTimeout(snapshotTimerRef.current);
+      snapshotTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearSnapshotTimer();
+    };
+  }, [clearSnapshotTimer]);
+
+  useEffect(() => {
     if (!canvas) return;
 
-    const json = JSON.stringify(canvas.toJSON());
-    setUndoStack((prev) => [...prev, json]);
-    setRedoStack([]); // Clear redo stack on new action
-  }, [canvas]);
+    const initialSnapshot = serializeCanvasState(canvas);
+    lastSnapshotRef.current = initialSnapshot;
+    setUndoStack([initialSnapshot]);
+    setRedoStack([]);
+
+    const scheduleSnapshot = () => {
+      if (isRestoringHistoryRef.current) {
+        return;
+      }
+
+      clearSnapshotTimer();
+      snapshotTimerRef.current = window.setTimeout(() => {
+        snapshotTimerRef.current = null;
+        if (isRestoringHistoryRef.current) {
+          return;
+        }
+
+        const nextSnapshot = serializeCanvasState(canvas);
+        if (lastSnapshotRef.current === nextSnapshot) {
+          return;
+        }
+
+        setUndoStack((prev) => {
+          const next = [...prev, nextSnapshot];
+          if (next.length > HISTORY_LIMIT) {
+            return next.slice(next.length - HISTORY_LIMIT);
+          }
+          return next;
+        });
+        setRedoStack([]);
+        lastSnapshotRef.current = nextSnapshot;
+      }, HISTORY_DEBOUNCE_MS);
+    };
+
+    canvas.on('after:render', scheduleSnapshot);
+
+    return () => {
+      clearSnapshotTimer();
+      canvas.off('after:render', scheduleSnapshot);
+    };
+  }, [canvas, clearSnapshotTimer]);
 
   // Undo function
   const undo = React.useCallback(() => {
-    if (!canvas || undoStack.length === 0) return;
+    if (!canvas || isRestoringHistoryRef.current || undoStack.length <= 1) return;
 
-    const currentState = JSON.stringify(canvas.toJSON());
-    const previousState = undoStack[undoStack.length - 1];
+    clearSnapshotTimer();
+    isRestoringHistoryRef.current = true;
 
-    setRedoStack((prev) => [currentState, ...prev]);
+    const currentState = undoStack[undoStack.length - 1];
+    const previousState = undoStack[undoStack.length - 2];
+
     setUndoStack((prev) => prev.slice(0, -1));
+    setRedoStack((prev) => [...prev, currentState]);
 
     canvas.loadFromJSON(previousState).then(() => {
+      canvas.discardActiveObject();
       canvas.renderAll();
+      lastSnapshotRef.current = previousState;
+    }).finally(() => {
+      isRestoringHistoryRef.current = false;
     });
-  }, [canvas, undoStack]);
+  }, [canvas, undoStack, clearSnapshotTimer]);
 
   // Redo function
   const redo = React.useCallback(() => {
-    if (!canvas || redoStack.length === 0) return;
+    if (!canvas || isRestoringHistoryRef.current || redoStack.length === 0) return;
 
-    const currentState = JSON.stringify(canvas.toJSON());
-    const nextState = redoStack[0];
+    clearSnapshotTimer();
+    isRestoringHistoryRef.current = true;
 
-    setUndoStack((prev) => [...prev, currentState]);
-    setRedoStack((prev) => prev.slice(1));
+    const nextState = redoStack[redoStack.length - 1];
+
+    setRedoStack((prev) => prev.slice(0, -1));
+    setUndoStack((prev) => {
+      const next = [...prev, nextState];
+      if (next.length > HISTORY_LIMIT) {
+        return next.slice(next.length - HISTORY_LIMIT);
+      }
+      return next;
+    });
 
     canvas.loadFromJSON(nextState).then(() => {
+      canvas.discardActiveObject();
       canvas.renderAll();
+      lastSnapshotRef.current = nextState;
+    }).finally(() => {
+      isRestoringHistoryRef.current = false;
     });
-  }, [canvas, redoStack]);
+  }, [canvas, redoStack, clearSnapshotTimer]);
 
   return (
     <CanvasContext.Provider
@@ -93,6 +189,8 @@ export function CanvasProvider({ children }: { children: React.ReactNode }) {
         setFillColor,
         strokeWidth,
         setStrokeWidth,
+        pressureSimulation,
+        setPressureSimulation,
         zoom,
         setZoom,
         undo,

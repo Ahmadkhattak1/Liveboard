@@ -21,9 +21,10 @@
   justify-content: center;
   width: 44px;
   height: 44px;
-  border: none;
+  border: 1px solid transparent;
   border-radius: var(--radius-md);
   background: transparent;
+  color: var(--text);
   cursor: pointer;
   transition: all var(--transition);
   position: relative;
@@ -34,16 +35,265 @@
 }
 
 .toolButton.active {
-  background: var(--text);
+  background: var(--bg-secondary);
+  border-color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 
 .toolButton.active .emoji {
-  filter: invert(1);
+  filter: none;
 }
 
 .emoji {
   font-size: 24px;
   line-height: 1;
+}
+
+.vectorIcon {
+  width: 22px;
+  height: 22px;
+  color: currentColor;
+}
+
+.houseIcon {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.toolButton.active .vectorIcon {
+  color: currentColor;
+}
+
+.toolDropdown {
+  position: relative;
+}
+
+.modeTrigger {
+  position: relative;
+}
+
+.shapeTrigger {
+  position: relative;
+}
+
+.dropdownArrow {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--text-secondary);
+  transition: transform var(--transition), color var(--transition);
+}
+
+.open {
+  transform: rotate(180deg);
+}
+
+.toolButton.active .dropdownArrow {
+  color: var(--text-secondary);
+}
+
+.toolMenu {
+  position: absolute;
+  top: 0;
+  left: calc(100% + 10px);
+  min-width: 196px;
+  padding: 8px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-light);
+  background: var(--bg);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 110;
+}
+
+.toolMenuItem {
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  transition: all var(--transition);
+  text-align: left;
+}
+
+.toolMenuItem:hover {
+  background: var(--bg-secondary);
+  border-color: var(--border-light);
+}
+
+.toolMenuItemActive {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--bg);
+}
+
+.toolMenuItemActive:hover {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--bg);
+}
+
+.toolMenuItemActive .toolMenuIcon {
+  color: var(--bg);
+}
+
+.toolMenuItemActive .toolMenuLabel {
+  color: var(--bg);
+}
+
+.toolMenuIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+}
+
+.toolMenuIcon .vectorIcon {
+  width: 18px;
+  height: 18px;
+  color: currentColor;
+}
+
+.toolMenuLabel {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.toolMenuMeta {
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  color: var(--text-secondary);
+  font-family: monospace;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.toolMenuItemActive .toolMenuMeta {
+  color: var(--bg);
+  opacity: 0.85;
+}
+
+.shapePanel {
+  position: absolute;
+  top: 0;
+  left: calc(100% + 10px);
+  width: 300px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid var(--border-light);
+  background: var(--bg);
+  box-shadow: var(--shadow-md);
+  z-index: 115;
+}
+
+.shapeConnectorRow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.shapeIconButton {
+  height: 44px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.shapeIconButton:hover {
+  background: var(--bg-secondary);
+  border-color: var(--border-light);
+}
+
+.shapeIconButtonActive {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--bg);
+}
+
+.shapeIconButtonActive .vectorIcon {
+  color: var(--bg);
+}
+
+.shapePanelDivider {
+  height: 1px;
+  background: var(--border-light);
+  margin: 12px 0;
+}
+
+.shapeGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.shapeTile {
+  height: 54px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.shapeTile:hover {
+  background: var(--bg-secondary);
+  border-color: var(--border-light);
+}
+
+.shapeTileActive {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--bg);
+}
+
+.shapeTileActive .vectorIcon {
+  color: var(--bg);
+}
+
+.shapeTile .vectorIcon,
+.shapeIconButton .vectorIcon {
+  width: 24px;
+  height: 24px;
+}
+
+.moreShapesButton {
+  margin-top: 10px;
+  width: 100%;
+  height: 34px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.moreShapesButton:hover {
+  border-color: var(--text);
+  background: var(--bg-secondary);
 }
 
 /* Tooltip on hover */
@@ -67,12 +317,62 @@
   opacity: 1;
 }
 
+.modeTrigger[aria-expanded='true']::after {
+  opacity: 0;
+}
+
+.shapeTrigger[aria-expanded='true']::after {
+  opacity: 0;
+}
+
 /* Divider */
 .divider {
   width: 100%;
   height: 1px;
   background: var(--border-light);
   margin: 8px 0;
+}
+
+.sidebarColors {
+  width: 44px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.sidebarColorButton {
+  width: 19px;
+  height: 19px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: transform var(--transition), box-shadow var(--transition);
+}
+
+.sidebarColorButton:hover {
+  transform: scale(1.06);
+}
+
+.sidebarColorActive {
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--text);
+}
+
+.sidebarColorToggle {
+  grid-column: 1 / -1;
+  height: 20px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  transition: all var(--transition);
+}
+
+.sidebarColorToggle:hover {
+  color: var(--text);
+  border-color: var(--border);
 }
 
 /* Properties panel (floating) */
@@ -89,7 +389,7 @@
   gap: 16px;
   box-shadow: var(--shadow-md);
   z-index: 90;
-  min-width: 240px;
+  min-width: 220px;
 }
 
 .propertiesPanel.hidden {
@@ -110,42 +410,26 @@
   letter-spacing: 0.5px;
 }
 
-/* Color picker grid */
-.colorGrid {
-  display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 6px;
+.propertyLabelInline {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
 }
 
-.colorButton {
-  width: 32px;
-  height: 32px;
-  border: 2px solid transparent;
-  border-radius: var(--radius-sm);
+.toggleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.toggleInput {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--text);
   cursor: pointer;
-  transition: all var(--transition);
-  position: relative;
-}
-
-.colorButton:hover {
-  transform: scale(1.1);
-}
-
-.colorButton.active {
-  border-color: var(--text);
-  transform: scale(1.15);
-}
-
-.colorButton.active::after {
-  content: '✓';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  color: white;
-  font-size: 16px;
-  font-weight: bold;
-  text-shadow: 0 0 2px rgba(0,0,0,0.5);
 }
 
 /* Stroke width slider */
@@ -198,35 +482,65 @@
 /* Zoom controls (bottom right like Miro) */
 .zoomControls {
   position: fixed;
-  bottom: 24px;
-  right: 24px;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(16px, env(safe-area-inset-bottom));
   display: flex;
-  gap: 8px;
+  gap: 6px;
   background: var(--bg);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-lg);
-  padding: 8px;
+  padding: 6px;
   box-shadow: var(--shadow-md);
-  z-index: 90;
+  z-index: 220;
+  isolation: isolate;
+  pointer-events: auto;
+  transform: translateZ(0);
+  will-change: transform;
 }
 
 .zoomButton {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   border: none;
   border-radius: var(--radius-md);
   background: transparent;
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 500;
   cursor: pointer;
   transition: all var(--transition);
+  color: var(--text);
+}
+
+.zoomButtonCompact {
+  width: 30px;
+  height: 30px;
+}
+
+.zoomIcon {
+  width: 15px;
+  height: 15px;
 }
 
 .zoomButton:hover {
   background: var(--bg-secondary);
+}
+
+.zoomButton:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.zoomButton:disabled:hover {
+  background: transparent;
+}
+
+.zoomDivider {
+  width: 1px;
+  background: var(--border-light);
+  margin: 2px 1px;
 }
 
 .zoomDisplay {
@@ -256,8 +570,43 @@
     font-size: 20px;
   }
 
+  .vectorIcon {
+    width: 20px;
+    height: 20px;
+  }
+
   .propertiesPanel {
     left: 60px;
     min-width: 200px;
+  }
+
+  .toolMenu {
+    left: calc(100% + 8px);
+    min-width: 180px;
+  }
+
+  .shapePanel {
+    left: calc(100% + 8px);
+    width: 280px;
+    padding: 12px;
+  }
+
+  .shapeTile {
+    height: 48px;
+  }
+
+  .moreShapesButton {
+    height: 32px;
+    font-size: 11px;
+  }
+
+  .sidebarColors {
+    width: 40px;
+    gap: 5px;
+  }
+
+  .sidebarColorButton {
+    width: 17px;
+    height: 17px;
   }
 }

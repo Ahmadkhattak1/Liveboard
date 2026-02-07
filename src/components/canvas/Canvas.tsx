@@ -5,22 +5,248 @@ import * as fabric from 'fabric';
 import { useCanvas } from './CanvasProvider';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { initializeFabricCanvas, resizeCanvas } from '@/lib/canvas/fabricCanvas';
-import { enableDrawingMode, disableDrawingMode } from '@/lib/canvas/drawingTools';
-import { addRectangle, addCircle, addLine } from '@/lib/canvas/shapeTools';
+import {
+  createShapeForDrag,
+  finalizeDraggedShape,
+  isConnectorShapeTool,
+  isShapeToolType,
+  ShapeToolType,
+  updateDraggedShape,
+} from '@/lib/canvas/shapeTools';
 import { addText } from '@/lib/canvas/textTools';
-import { addStickyNote } from '@/lib/canvas/stickyNotes';
+import {
+  DEFAULT_STICKY_NOTE_COLOR,
+  STICKY_DEFAULT_HEIGHT,
+  STICKY_DEFAULT_WIDTH,
+  STICKY_NOTE_COLORS,
+  addStickyNote,
+  findStickyContainerById,
+  focusStickyNoteEditor,
+  getStickyContainerForObject,
+  getStickyObjectId,
+  isStickyObject,
+  removeStickyNote,
+  typeInStickyNote,
+} from '@/lib/canvas/stickyNotes';
 import { PressureBrush } from '@/lib/canvas/pressureBrush';
+import { addImageFromFile } from '@/lib/canvas/imageTools';
+import { APP_CONFIG, CANVAS_CONFIG } from '@/lib/constants/config';
+import { validateImageDimensions, validateImageFile } from '@/lib/utils/validators';
 import styles from './Canvas.module.css';
+
+function shouldEnableSelection(tool: string): boolean {
+  return tool === 'select' || tool === 'eraser';
+}
+
+function isShapeTool(tool: string): boolean {
+  return isShapeToolType(tool);
+}
+
+function applyCanvasCursors(
+  canvas: fabric.Canvas,
+  tool: string,
+  options: { grabbing?: boolean; panReady?: boolean } = {}
+): void {
+  if (options.grabbing) {
+    canvas.defaultCursor = 'grabbing';
+    canvas.hoverCursor = 'grabbing';
+    canvas.moveCursor = 'grabbing';
+    return;
+  }
+
+  if (options.panReady) {
+    canvas.defaultCursor = 'grab';
+    canvas.hoverCursor = 'grab';
+    canvas.moveCursor = 'grab';
+    return;
+  }
+
+  canvas.freeDrawingCursor = tool === 'pen' ? 'crosshair' : 'default';
+
+  if (tool === 'hand') {
+    canvas.defaultCursor = 'grab';
+    canvas.hoverCursor = 'grab';
+    canvas.moveCursor = 'grab';
+    return;
+  }
+
+  if (tool === 'pen') {
+    canvas.defaultCursor = 'crosshair';
+    canvas.hoverCursor = 'crosshair';
+    canvas.moveCursor = 'crosshair';
+    return;
+  }
+
+  if (isShapeTool(tool)) {
+    canvas.defaultCursor = 'crosshair';
+    canvas.hoverCursor = 'move';
+    canvas.moveCursor = 'grabbing';
+    return;
+  }
+
+  if (tool === 'text') {
+    canvas.defaultCursor = 'text';
+    canvas.hoverCursor = 'text';
+    canvas.moveCursor = 'text';
+    return;
+  }
+
+  if (tool === 'sticky') {
+    canvas.defaultCursor = STICKY_CURSOR;
+    canvas.hoverCursor = STICKY_CURSOR;
+    canvas.moveCursor = STICKY_CURSOR;
+    return;
+  }
+
+  if (tool === 'image') {
+    canvas.defaultCursor = 'copy';
+    canvas.hoverCursor = 'copy';
+    canvas.moveCursor = 'copy';
+    return;
+  }
+
+  // select + eraser fallback
+  canvas.defaultCursor = 'default';
+  canvas.hoverCursor = 'move';
+  canvas.moveCursor = 'grabbing';
+}
+
+const MIN_ZOOM = 0.1;
+const MAX_ZOOM = 5;
+const KEYBOARD_PAN_STEP = 80;
+const KEYBOARD_PAN_STEP_FAST = 220;
+const GRID_MINOR_BASE = 20;
+const GRID_MAJOR_BASE = 100;
+const GRID_MINOR_MIN_SCREEN_SPACING = 24;
+const GRID_MAJOR_MIN_SCREEN_SPACING = 120;
+const GRID_MINOR_FADE_START = 9;
+const GRID_MINOR_FADE_END = 18;
+const GRID_MAJOR_FADE_START = 16;
+const GRID_MAJOR_FADE_END = 36;
+const GRID_MAJOR_MIN_VISIBILITY = 0.42;
+const IMAGE_PASTE_OFFSET = 24;
+const IMAGE_PASTE_NOTICE_TIMEOUT_MS = 3800;
+const OPEN_IMAGE_PICKER_EVENT = 'liveboard:open-image-picker';
+const STICKY_CURSOR =
+  'url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2732%27 height=%2732%27 viewBox=%270 0 32 32%27%3E%3Cg fill=%27none%27 fill-rule=%27evenodd%27%3E%3Crect x=%278%27 y=%273%27 width=%2716%27 height=%2726%27 rx=%272.5%27 fill=%27%23F6E46C%27 stroke=%27%232E3A4A%27 stroke-width=%271.8%27/%3E%3Cpath d=%27M19 3v5h5%27 stroke=%27%232E3A4A%27 stroke-width=%271.8%27 stroke-linecap=%27round%27/%3E%3Cpath d=%27M12 13.5h8M12 17.5h6%27 stroke=%27%23515F73%27 stroke-width=%271.5%27 stroke-linecap=%27round%27/%3E%3C/g%3E%3C/svg%3E") 5 4, copy';
+
+interface StickySelectionState {
+  id: string;
+}
+
+function isTextInputFocused(): boolean {
+  const activeElement = document.activeElement;
+  if (!activeElement) return false;
+
+  if (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA') {
+    return true;
+  }
+
+  return (activeElement as HTMLElement).isContentEditable;
+}
+
+function isPlainTypingKey(event: KeyboardEvent): boolean {
+  return event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey;
+}
+
+function getClipboardImageFiles(event: ClipboardEvent): File[] {
+  const clipboardData = event.clipboardData;
+  if (!clipboardData) return [];
+
+  const imageFiles: File[] = [];
+
+  const items = Array.from(clipboardData.items ?? []);
+  items.forEach((item) => {
+    if (item.kind !== 'file' || !item.type.startsWith('image/')) {
+      return;
+    }
+
+    const file = item.getAsFile();
+    if (file) {
+      imageFiles.push(file);
+    }
+  });
+
+  if (imageFiles.length > 0) {
+    return imageFiles;
+  }
+
+  const files = Array.from(clipboardData.files ?? []);
+  return files.filter((file) => file.type.startsWith('image/'));
+}
+
+function getViewportCenterInScene(canvas: fabric.Canvas): { x: number; y: number } {
+  const vpt = canvas.viewportTransform;
+  const centerX = canvas.getWidth() / 2;
+  const centerY = canvas.getHeight() / 2;
+
+  if (!vpt || vpt[0] === 0 || vpt[3] === 0) {
+    return { x: centerX, y: centerY };
+  }
+
+  return {
+    x: (centerX - vpt[4]) / vpt[0],
+    y: (centerY - vpt[5]) / vpt[3],
+  };
+}
+
+function positiveModulo(value: number, divisor: number): number {
+  if (!Number.isFinite(divisor) || divisor === 0) {
+    return 0;
+  }
+  return ((value % divisor) + divisor) % divisor;
+}
+
+function smoothstep(edge0: number, edge1: number, value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  if (edge0 === edge1) {
+    return value >= edge1 ? 1 : 0;
+  }
+  const t = Math.max(0, Math.min(1, (value - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+function softClampGridSize(rawSize: number, minSize: number): number {
+  if (!Number.isFinite(rawSize) || rawSize <= 0) {
+    return minSize;
+  }
+
+  if (rawSize >= minSize) {
+    return rawSize;
+  }
+
+  // Smoothly converge to minSize as zoom goes out to avoid abrupt grid snapping.
+  const smooth = smoothstep(0, minSize, rawSize);
+  return minSize + (rawSize - minSize) * smooth;
+}
+
+function resolveCanvasConstraint(value: number, fallback: number): number {
+  if (!Number.isFinite(value) || value <= 0) {
+    return fallback;
+  }
+  return Math.round(value);
+}
 
 export function Canvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const imageFileInputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const isPanningRef = useRef(false);
   const lastPosXRef = useRef(0);
   const lastPosYRef = useRef(0);
   const spacebarPressedRef = useRef(false);
   const middleMousePanningRef = useRef(false);
+  const gestureScaleRef = useRef(1);
+  const imagePasteNoticeTimerRef = useRef<number | null>(null);
   const [hasSelection, setHasSelection] = React.useState(false);
+  const [selectedSticky, setSelectedSticky] = React.useState<StickySelectionState | null>(null);
+  const [stickyPlacementColor, setStickyPlacementColor] = React.useState(DEFAULT_STICKY_NOTE_COLOR);
+  const [imagePasteNotice, setImagePasteNotice] = React.useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
   const {
     canvas,
     setCanvas,
@@ -29,26 +255,23 @@ export function Canvas() {
     strokeColor,
     fillColor,
     strokeWidth,
+    pressureSimulation,
     zoom,
     setZoom,
     undo,
     redo,
   } = useCanvas();
   const { user } = useAuth();
-
-  // Delete selected objects
-  const handleDelete = () => {
-    if (!canvas) return;
-
-    const activeObjects = canvas.getActiveObjects();
-    if (activeObjects && activeObjects.length > 0) {
-      activeObjects.forEach((obj) => {
-        canvas.remove(obj);
-      });
-      canvas.discardActiveObject();
-      canvas.renderAll();
-    }
-  };
+  const minCanvasWidth = resolveCanvasConstraint(CANVAS_CONFIG.minWidth, 900);
+  const minCanvasHeight = resolveCanvasConstraint(CANVAS_CONFIG.minHeight, 560);
+  const maxCanvasWidth = resolveCanvasConstraint(CANVAS_CONFIG.maxWidth, 1800);
+  const maxCanvasHeight = resolveCanvasConstraint(CANVAS_CONFIG.maxHeight, 1000);
+  const canvasSizingStyle = {
+    ['--canvas-min-width' as const]: `${Math.min(minCanvasWidth, maxCanvasWidth)}px`,
+    ['--canvas-min-height' as const]: `${Math.min(minCanvasHeight, maxCanvasHeight)}px`,
+    ['--canvas-max-width' as const]: `${maxCanvasWidth}px`,
+    ['--canvas-max-height' as const]: `${maxCanvasHeight}px`,
+  } as React.CSSProperties;
 
   // Initialize canvas
   useEffect(() => {
@@ -80,16 +303,247 @@ export function Canvas() {
     };
   }, [setCanvas]);
 
+  const actorId = user?.id ?? 'guest-user';
+
+  useEffect(() => {
+    if (!canvas || !containerRef.current) return;
+
+    const syncGridToViewport = () => {
+      if (!containerRef.current) return;
+
+      const zoomLevel = Math.max(MIN_ZOOM, canvas.getZoom());
+      const rawMinorSize = GRID_MINOR_BASE * zoomLevel;
+      const rawMajorSize = GRID_MAJOR_BASE * zoomLevel;
+      const minorSize = Math.max(
+        1,
+        softClampGridSize(rawMinorSize, GRID_MINOR_MIN_SCREEN_SPACING)
+      );
+      const majorSize = Math.max(
+        1,
+        softClampGridSize(rawMajorSize, GRID_MAJOR_MIN_SCREEN_SPACING)
+      );
+      const minorVisibility = smoothstep(
+        GRID_MINOR_FADE_START,
+        GRID_MINOR_FADE_END,
+        rawMinorSize
+      );
+      const majorVisibility = GRID_MAJOR_MIN_VISIBILITY + (1 - GRID_MAJOR_MIN_VISIBILITY) * smoothstep(
+        GRID_MAJOR_FADE_START,
+        GRID_MAJOR_FADE_END,
+        rawMajorSize
+      );
+      const vpt = canvas.viewportTransform;
+      const translateX = vpt?.[4] ?? 0;
+      const translateY = vpt?.[5] ?? 0;
+
+      containerRef.current.style.setProperty('--grid-cell-size', `${minorSize}px`);
+      containerRef.current.style.setProperty('--grid-major-size', `${majorSize}px`);
+      containerRef.current.style.setProperty('--grid-minor-opacity-scale', `${minorVisibility}`);
+      containerRef.current.style.setProperty('--grid-major-opacity-scale', `${majorVisibility}`);
+      containerRef.current.style.setProperty(
+        '--grid-minor-offset-x',
+        `${positiveModulo(translateX, minorSize)}px`
+      );
+      containerRef.current.style.setProperty(
+        '--grid-minor-offset-y',
+        `${positiveModulo(translateY, minorSize)}px`
+      );
+      containerRef.current.style.setProperty(
+        '--grid-major-offset-x',
+        `${positiveModulo(translateX, majorSize)}px`
+      );
+      containerRef.current.style.setProperty(
+        '--grid-major-offset-y',
+        `${positiveModulo(translateY, majorSize)}px`
+      );
+    };
+
+    syncGridToViewport();
+    canvas.on('after:render', syncGridToViewport);
+
+    return () => {
+      canvas.off('after:render', syncGridToViewport);
+    };
+  }, [canvas]);
+
+  const deleteActiveSelection = React.useCallback(() => {
+    if (!canvas) return;
+
+    const activeObjects = canvas.getActiveObjects();
+    if (!activeObjects || activeObjects.length === 0) {
+      return;
+    }
+
+    activeObjects.forEach((object) => {
+      if (isStickyObject(object)) {
+        removeStickyNote(canvas, object);
+        return;
+      }
+      canvas.remove(object);
+    });
+
+    canvas.discardActiveObject();
+    canvas.requestRenderAll();
+  }, [canvas]);
+
+  const handleDelete = React.useCallback(() => {
+    deleteActiveSelection();
+  }, [deleteActiveSelection]);
+
+  const resolveSelectedSticky = React.useCallback((): fabric.Rect | null => {
+    if (!canvas || !selectedSticky) return null;
+
+    const activeObject = canvas.getActiveObject();
+    const activeContainer = getStickyContainerForObject(canvas, activeObject);
+    if (activeContainer && getStickyObjectId(activeContainer) === selectedSticky.id) {
+      return activeContainer;
+    }
+
+    return findStickyContainerById(canvas, selectedSticky.id);
+  }, [canvas, selectedSticky]);
+
+  const handleStickyEdit = React.useCallback(() => {
+    if (!canvas) return;
+    const stickyContainer = resolveSelectedSticky();
+    if (!stickyContainer) return;
+    focusStickyNoteEditor(canvas, stickyContainer, true);
+  }, [canvas, resolveSelectedSticky]);
+
+  const handleStickyTypeKey = React.useCallback(
+    (value: string) => {
+      if (!canvas) return;
+      const stickyContainer = resolveSelectedSticky();
+      if (!stickyContainer) return;
+      typeInStickyNote(canvas, stickyContainer, value);
+    },
+    [canvas, resolveSelectedSticky]
+  );
+
+  const panViewportBy = React.useCallback(
+    (deltaX: number, deltaY: number) => {
+      if (!canvas) return;
+      const vpt = canvas.viewportTransform;
+      if (!vpt) return;
+
+      vpt[4] += deltaX;
+      vpt[5] += deltaY;
+      canvas.requestRenderAll();
+    },
+    [canvas]
+  );
+
+  const showImagePasteNotice = React.useCallback(
+    (type: 'success' | 'error', message: string) => {
+      if (imagePasteNoticeTimerRef.current) {
+        window.clearTimeout(imagePasteNoticeTimerRef.current);
+      }
+
+      setImagePasteNotice({ type, message });
+      imagePasteNoticeTimerRef.current = window.setTimeout(() => {
+        setImagePasteNotice(null);
+      }, IMAGE_PASTE_NOTICE_TIMEOUT_MS);
+    },
+    []
+  );
+
+  const openImageFilePicker = React.useCallback(() => {
+    const inputElement = imageFileInputRef.current;
+    if (!inputElement) return;
+
+    inputElement.value = '';
+    inputElement.click();
+  }, []);
+
+  const handleImageFileInputChange = React.useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const selectedFile = event.target.files?.[0];
+      event.target.value = '';
+
+      if (!selectedFile) {
+        return;
+      }
+
+      if (!canvas) {
+        showImagePasteNotice('error', 'Canvas is not ready yet');
+        return;
+      }
+
+      const maxObjectsPerBoard = Number.isFinite(APP_CONFIG.maxObjectsPerBoard) &&
+        APP_CONFIG.maxObjectsPerBoard > 0
+        ? APP_CONFIG.maxObjectsPerBoard
+        : 1000;
+
+      if (canvas.getObjects().length >= maxObjectsPerBoard) {
+        showImagePasteNotice('error', `Board limit reached (${maxObjectsPerBoard} objects)`);
+        return;
+      }
+
+      const fileValidation = validateImageFile(selectedFile);
+      if (!fileValidation.valid) {
+        showImagePasteNotice('error', fileValidation.error ?? 'Invalid image file');
+        return;
+      }
+
+      const dimensionValidation = await validateImageDimensions(selectedFile);
+      if (!dimensionValidation.valid) {
+        showImagePasteNotice(
+          'error',
+          dimensionValidation.error ?? 'Invalid image dimensions'
+        );
+        return;
+      }
+
+      const viewportCenter = getViewportCenterInScene(canvas);
+
+      try {
+        await addImageFromFile(canvas, actorId, selectedFile, {
+          left: viewportCenter.x,
+          top: viewportCenter.y,
+          maxWidth: 700,
+          maxHeight: 700,
+        });
+        showImagePasteNotice('success', 'Image uploaded');
+      } catch {
+        showImagePasteNotice('error', 'Failed to place image on canvas');
+      }
+    },
+    [actorId, canvas, showImagePasteNotice]
+  );
+
+  useEffect(() => {
+    const handleImagePickerRequest = () => {
+      if (!canvas) {
+        showImagePasteNotice('error', 'Canvas is not ready yet');
+        return;
+      }
+      openImageFilePicker();
+    };
+
+    window.addEventListener(OPEN_IMAGE_PICKER_EVENT, handleImagePickerRequest);
+    return () => {
+      window.removeEventListener(OPEN_IMAGE_PICKER_EVENT, handleImagePickerRequest);
+    };
+  }, [canvas, openImageFilePicker, showImagePasteNotice]);
+
+  useEffect(() => {
+    return () => {
+      if (imagePasteNoticeTimerRef.current) {
+        window.clearTimeout(imagePasteNoticeTimerRef.current);
+      }
+    };
+  }, []);
+
   // Handle tool changes
   useEffect(() => {
-    if (!canvas || !user) return;
+    if (!canvas) return;
 
     // Reset canvas interaction mode
     canvas.isDrawingMode = false;
     canvas.selection = true;
+    canvas.skipTargetFind = false;
+    applyCanvasCursors(canvas, activeTool);
 
-    // Remove any previous event listeners
-    canvas.off('mouse:down');
+    let cleanup = () => {};
 
     switch (activeTool) {
       case 'select':
@@ -97,11 +551,10 @@ export function Canvas() {
         canvas.selection = true;
         break;
 
-      case 'hand':
+      case 'hand': {
         // Hand tool for panning
         canvas.selection = false;
-        canvas.defaultCursor = 'grab';
-        canvas.hoverCursor = 'grab';
+        canvas.skipTargetFind = true;
 
         let isHandPanning = false;
         let lastX = 0;
@@ -111,8 +564,7 @@ export function Canvas() {
           isHandPanning = true;
           lastX = (e.e as any).clientX;
           lastY = (e.e as any).clientY;
-          canvas.defaultCursor = 'grabbing';
-          canvas.hoverCursor = 'grabbing';
+          applyCanvasCursors(canvas, activeTool, { grabbing: true });
         };
 
         const handleHandMouseMove = (e: fabric.TPointerEventInfo<fabric.TPointerEvent>) => {
@@ -130,82 +582,228 @@ export function Canvas() {
 
         const handleHandMouseUp = () => {
           isHandPanning = false;
-          canvas.defaultCursor = 'grab';
-          canvas.hoverCursor = 'grab';
+          applyCanvasCursors(canvas, activeTool);
         };
 
         canvas.on('mouse:down', handleHandMouseDown);
         canvas.on('mouse:move', handleHandMouseMove);
         canvas.on('mouse:up', handleHandMouseUp);
-        break;
 
-      case 'pen':
-        // Enable free drawing mode with pressure simulation
+        cleanup = () => {
+          canvas.off('mouse:down', handleHandMouseDown);
+          canvas.off('mouse:move', handleHandMouseMove);
+          canvas.off('mouse:up', handleHandMouseUp);
+        };
+        break;
+      }
+
+      case 'pen': {
+        // Enable free drawing mode (pressure simulation optional)
         canvas.isDrawingMode = true;
         canvas.selection = false;
+        canvas.skipTargetFind = true;
 
-        const brush = new PressureBrush(canvas);
+        const brush = pressureSimulation
+          ? new PressureBrush(canvas)
+          : new fabric.PencilBrush(canvas);
         brush.color = strokeColor;
-        brush.widthValue = strokeWidth; // Use custom setter
+        if (brush instanceof PressureBrush) {
+          brush.widthValue = strokeWidth;
+        } else {
+          brush.width = strokeWidth;
+        }
         brush.strokeLineCap = 'round';
         brush.strokeLineJoin = 'round';
         canvas.freeDrawingBrush = brush;
 
         // Add ID to newly created paths
-        canvas.on('path:created', (e: any) => {
+        const handlePathCreated = (e: any) => {
           const path = e.path;
           (path as any).id = `path-${Date.now()}`;
-          (path as any).createdBy = user.id;
-        });
+          (path as any).createdBy = actorId;
+        };
+        canvas.on('path:created', handlePathCreated);
+
+        cleanup = () => {
+          canvas.off('path:created', handlePathCreated);
+        };
         break;
+      }
 
       case 'rectangle':
-        canvas.selection = false;
-        canvas.on('mouse:down', () => {
-          addRectangle(canvas, user.id, {
-            stroke: strokeColor,
-            fill: fillColor,
-            strokeWidth,
-          });
-        });
-        break;
-
+      case 'roundedRectangle':
       case 'circle':
-        canvas.selection = false;
-        canvas.on('mouse:down', () => {
-          addCircle(canvas, user.id, {
-            stroke: strokeColor,
-            fill: fillColor,
-            strokeWidth,
-          });
-        });
-        break;
-
+      case 'diamond':
+      case 'triangle':
+      case 'star':
+      case 'hexagon':
+      case 'parallelogram':
+      case 'blockArrow':
       case 'line':
+      case 'arrow':
+      case 'elbowArrow':
+      case 'curvedArrow': {
+        const shapeTool: ShapeToolType = activeTool;
+        // Keep target finding enabled so existing shapes can be selected naturally.
         canvas.selection = false;
-        canvas.on('mouse:down', () => {
-          addLine(canvas, user.id, {
+        canvas.skipTargetFind = false;
+
+        let isDraggingShape = false;
+        let dragStart: { x: number; y: number } | null = null;
+        let activeShape: ReturnType<typeof createShapeForDrag> | null = null;
+
+        const handleShapeMouseDown = (
+          event: fabric.TPointerEventInfo<fabric.TPointerEvent>
+        ) => {
+          const pointerEvent = event.e as MouseEvent;
+          if (pointerEvent.button !== undefined && pointerEvent.button !== 0) {
+            return;
+          }
+
+          // In shape mode, clicking an existing object should select it, not spawn a new shape.
+          if (event.target) {
+            canvas.setActiveObject(event.target);
+            canvas.requestRenderAll();
+            return;
+          }
+
+          const pointer = canvas.getScenePoint(event.e);
+          dragStart = { x: pointer.x, y: pointer.y };
+          activeShape = createShapeForDrag(canvas, actorId, shapeTool, dragStart, {
             stroke: strokeColor,
+            fill: isConnectorShapeTool(shapeTool) ? undefined : fillColor,
             strokeWidth,
           });
-        });
-        break;
+          isDraggingShape = true;
+          canvas.discardActiveObject();
+          canvas.requestRenderAll();
+        };
 
-      case 'text':
-        canvas.selection = false;
-        canvas.on('mouse:down', () => {
-          addText(canvas, user.id, 'Double click to edit', {
-            fill: strokeColor,
+        const handleShapeMouseMove = (
+          event: fabric.TPointerEventInfo<fabric.TPointerEvent>
+        ) => {
+          if (!isDraggingShape || !activeShape || !dragStart) {
+            return;
+          }
+
+          const pointer = canvas.getScenePoint(event.e);
+          updateDraggedShape(
+            activeShape,
+            shapeTool,
+            dragStart,
+            { x: pointer.x, y: pointer.y },
+            { perfect: Boolean((event.e as MouseEvent).shiftKey) }
+          );
+          canvas.requestRenderAll();
+        };
+
+        const handleShapeMouseUp = (
+          event: fabric.TPointerEventInfo<fabric.TPointerEvent>
+        ) => {
+          if (!isDraggingShape || !activeShape || !dragStart) {
+            return;
+          }
+
+          const pointer = canvas.getScenePoint(event.e);
+          finalizeDraggedShape(activeShape, shapeTool, dragStart, {
+            x: pointer.x,
+            y: pointer.y,
+          }, {
+            perfect: Boolean((event.e as MouseEvent).shiftKey),
           });
-        });
-        break;
+          activeShape.set({
+            selectable: true,
+            evented: true,
+          });
+          activeShape.setCoords();
+          canvas.setActiveObject(activeShape);
+          canvas.requestRenderAll();
+          // One-shot behavior prevents accidental repeated shape creation.
+          setActiveTool('select');
+          isDraggingShape = false;
+          dragStart = null;
+          activeShape = null;
+        };
 
-      case 'sticky':
-        canvas.selection = false;
-        canvas.on('mouse:down', () => {
-          addStickyNote(canvas, user.id);
-        });
+        canvas.on('mouse:down', handleShapeMouseDown);
+        canvas.on('mouse:move', handleShapeMouseMove);
+        canvas.on('mouse:up', handleShapeMouseUp);
+
+        cleanup = () => {
+          canvas.off('mouse:down', handleShapeMouseDown);
+          canvas.off('mouse:move', handleShapeMouseMove);
+          canvas.off('mouse:up', handleShapeMouseUp);
+        };
         break;
+      }
+
+      case 'text': {
+        canvas.selection = false;
+        canvas.skipTargetFind = false;
+        const handleTextMouseDown = (
+          event: fabric.TPointerEventInfo<fabric.TPointerEvent>
+        ) => {
+          const pointerEvent = event.e as MouseEvent;
+          if (pointerEvent.button !== undefined && pointerEvent.button !== 0) {
+            return;
+          }
+
+          if (event.target instanceof fabric.IText) {
+            canvas.setActiveObject(event.target);
+            event.target.enterEditing();
+            event.target.selectAll();
+            canvas.requestRenderAll();
+            return;
+          }
+
+          if (event.target) {
+            canvas.setActiveObject(event.target);
+            canvas.requestRenderAll();
+            return;
+          }
+
+          const pointer = canvas.getScenePoint(event.e);
+          addText(canvas, actorId, 'Text', {
+            left: pointer.x,
+            top: pointer.y,
+            fill: strokeColor,
+            autoEdit: true,
+            selectAll: true,
+          });
+          setActiveTool('select');
+        };
+        canvas.on('mouse:down', handleTextMouseDown);
+        cleanup = () => {
+          canvas.off('mouse:down', handleTextMouseDown);
+        };
+        break;
+      }
+
+      case 'sticky': {
+        canvas.selection = false;
+        const handleStickyMouseDown = (
+          event: fabric.TPointerEventInfo<fabric.TPointerEvent>
+        ) => {
+          const pointerEvent = event.e as MouseEvent;
+          if (pointerEvent.button !== undefined && pointerEvent.button !== 0) {
+            return;
+          }
+
+          const pointer = canvas.getScenePoint(event.e);
+          addStickyNote(canvas, actorId, {
+            left: pointer.x - STICKY_DEFAULT_WIDTH / 2,
+            top: pointer.y - STICKY_DEFAULT_HEIGHT / 2,
+            color: stickyPlacementColor,
+            autoEdit: true,
+          });
+          setActiveTool('select');
+        };
+        canvas.on('mouse:down', handleStickyMouseDown);
+        cleanup = () => {
+          canvas.off('mouse:down', handleStickyMouseDown);
+        };
+        break;
+      }
 
       case 'eraser':
         canvas.selection = true;
@@ -214,12 +812,22 @@ export function Canvas() {
     }
 
     return () => {
-      canvas.off('mouse:down');
-      canvas.off('mouse:move');
-      canvas.off('mouse:up');
-      canvas.off('path:created');
+      cleanup();
+      canvas.isDrawingMode = false;
+      canvas.skipTargetFind = false;
+      applyCanvasCursors(canvas, 'select');
     };
-  }, [activeTool, canvas, user, strokeColor, fillColor, strokeWidth]);
+  }, [
+    activeTool,
+    actorId,
+    canvas,
+    strokeColor,
+    fillColor,
+    strokeWidth,
+    pressureSimulation,
+    setActiveTool,
+    stickyPlacementColor,
+  ]);
 
   // Update brush settings when color/width changes
   useEffect(() => {
@@ -241,38 +849,56 @@ export function Canvas() {
 
     const updateSelection = () => {
       const activeObjects = canvas.getActiveObjects();
-      setHasSelection(activeObjects && activeObjects.length > 0);
+      const hasActiveSelection = Boolean(activeObjects && activeObjects.length > 0);
+      setHasSelection(hasActiveSelection);
+
+      if (!hasActiveSelection || !activeObjects || activeObjects.length !== 1) {
+        setSelectedSticky(null);
+        return;
+      }
+
+      const selectedObject = activeObjects[0];
+      const stickyContainer = getStickyContainerForObject(canvas, selectedObject);
+      if (!stickyContainer) {
+        setSelectedSticky(null);
+        return;
+      }
+
+      if (selectedObject !== stickyContainer) {
+        canvas.setActiveObject(stickyContainer);
+        canvas.requestRenderAll();
+        return;
+      }
+
+      const stickyId = getStickyObjectId(stickyContainer);
+      if (!stickyId) {
+        setSelectedSticky(null);
+        return;
+      }
+      setSelectedSticky({ id: stickyId });
     };
 
     canvas.on('selection:created', updateSelection);
     canvas.on('selection:updated', updateSelection);
     canvas.on('selection:cleared', updateSelection);
+    canvas.on('object:removed', updateSelection);
+    canvas.on('object:modified', updateSelection);
 
     return () => {
       canvas.off('selection:created', updateSelection);
       canvas.off('selection:updated', updateSelection);
       canvas.off('selection:cleared', updateSelection);
+      canvas.off('object:removed', updateSelection);
+      canvas.off('object:modified', updateSelection);
     };
   }, [canvas]);
 
   // Handle delete key - delete selected objects
   useEffect(() => {
-    if (!canvas) return;
-
     const handleKeyDown = (event: KeyboardEvent) => {
-      if ((event.key === 'Delete' || event.key === 'Backspace') &&
-        document.activeElement?.tagName !== 'INPUT' &&
-        document.activeElement?.tagName !== 'TEXTAREA') {
+      if ((event.key === 'Delete' || event.key === 'Backspace') && !isTextInputFocused()) {
         event.preventDefault();
-
-        const activeObjects = canvas.getActiveObjects();
-        if (activeObjects && activeObjects.length > 0) {
-          activeObjects.forEach((obj) => {
-            canvas.remove(obj);
-          });
-          canvas.discardActiveObject();
-          canvas.renderAll();
-        }
+        deleteActiveSelection();
       }
     };
 
@@ -281,7 +907,113 @@ export function Canvas() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [canvas]);
+  }, [deleteActiveSelection]);
+
+  // Handle clipboard image paste
+  useEffect(() => {
+    if (!canvas) return;
+
+    const handlePaste = async (event: ClipboardEvent) => {
+      if (isTextInputFocused()) {
+        return;
+      }
+
+      const imageFiles = getClipboardImageFiles(event);
+      if (imageFiles.length === 0) {
+        return;
+      }
+
+      event.preventDefault();
+
+      const maxImagesPerPaste = Number.isFinite(APP_CONFIG.maxClipboardImagesPerPaste) &&
+        APP_CONFIG.maxClipboardImagesPerPaste > 0
+        ? APP_CONFIG.maxClipboardImagesPerPaste
+        : 3;
+      const maxObjectsPerBoard = Number.isFinite(APP_CONFIG.maxObjectsPerBoard) &&
+        APP_CONFIG.maxObjectsPerBoard > 0
+        ? APP_CONFIG.maxObjectsPerBoard
+        : 1000;
+
+      const filesToPaste = imageFiles.slice(0, maxImagesPerPaste);
+      const skippedForLimit = imageFiles.length - filesToPaste.length;
+      const validationErrors: string[] = [];
+      const viewportCenter = getViewportCenterInScene(canvas);
+      let availableBoardSlots = Math.max(0, maxObjectsPerBoard - canvas.getObjects().length);
+      let insertedCount = 0;
+
+      for (const [index, file] of filesToPaste.entries()) {
+        if (availableBoardSlots <= 0) {
+          validationErrors.push(`Board limit reached (${maxObjectsPerBoard} objects)`);
+          break;
+        }
+
+        const imageLabel = file.name || `Clipboard image ${index + 1}`;
+        const fileValidation = validateImageFile(file);
+        if (!fileValidation.valid) {
+          validationErrors.push(`${imageLabel}: ${fileValidation.error ?? 'Invalid image file'}`);
+          continue;
+        }
+
+        const dimensionValidation = await validateImageDimensions(file);
+        if (!dimensionValidation.valid) {
+          validationErrors.push(
+            `${imageLabel}: ${dimensionValidation.error ?? 'Invalid image dimensions'}`
+          );
+          continue;
+        }
+
+        try {
+          const placementOffset = insertedCount * IMAGE_PASTE_OFFSET;
+          await addImageFromFile(canvas, actorId, file, {
+            left: viewportCenter.x + placementOffset,
+            top: viewportCenter.y + placementOffset,
+            maxWidth: 700,
+            maxHeight: 700,
+          });
+          availableBoardSlots -= 1;
+          insertedCount += 1;
+        } catch {
+          validationErrors.push(`${imageLabel}: Failed to place image on canvas`);
+        }
+      }
+
+      if (skippedForLimit > 0) {
+        validationErrors.push(
+          `Only ${maxImagesPerPaste} image${maxImagesPerPaste === 1 ? '' : 's'} can be pasted at once`
+        );
+      }
+
+      if (insertedCount > 0) {
+        setActiveTool('select');
+
+        if (validationErrors.length > 0) {
+          const extraCount = validationErrors.length - 1;
+          const suffix = extraCount > 0 ? ` (+${extraCount} more)` : '';
+          showImagePasteNotice(
+            'error',
+            `Pasted ${insertedCount} image${insertedCount === 1 ? '' : 's'}. ${validationErrors[0]}${suffix}`
+          );
+        } else {
+          showImagePasteNotice(
+            'success',
+            `${insertedCount} image${insertedCount === 1 ? '' : 's'} pasted`
+          );
+        }
+        return;
+      }
+
+      if (validationErrors.length > 0) {
+        const extraCount = validationErrors.length - 1;
+        const suffix = extraCount > 0 ? ` (+${extraCount} more)` : '';
+        showImagePasteNotice('error', `${validationErrors[0]}${suffix}`);
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => {
+      window.removeEventListener('paste', handlePaste);
+    };
+  }, [actorId, canvas, setActiveTool, showImagePasteNotice]);
 
   // Handle middle mouse button panning
   useEffect(() => {
@@ -295,6 +1027,7 @@ export function Canvas() {
         lastPosXRef.current = (e.e as any).clientX;
         lastPosYRef.current = (e.e as any).clientY;
         canvas.selection = false;
+        applyCanvasCursors(canvas, activeTool, { grabbing: true });
         if (containerRef.current) {
           containerRef.current.classList.add(styles.panning);
         }
@@ -317,7 +1050,12 @@ export function Canvas() {
     const handleMiddleMouseUp = (e: fabric.TPointerEventInfo<fabric.TPointerEvent>) => {
       if ((e.e as any).button === 1 && middleMousePanningRef.current) {
         middleMousePanningRef.current = false;
-        canvas.selection = activeTool !== 'pen' && activeTool !== 'hand';
+        canvas.selection = shouldEnableSelection(activeTool);
+        if (spacebarPressedRef.current) {
+          applyCanvasCursors(canvas, activeTool, { panReady: true });
+        } else {
+          applyCanvasCursors(canvas, activeTool);
+        }
         if (containerRef.current) {
           containerRef.current.classList.remove(styles.panning);
         }
@@ -356,8 +1094,7 @@ export function Canvas() {
         document.activeElement?.tagName !== 'TEXTAREA') {
         event.preventDefault();
         spacebarPressedRef.current = true;
-        canvas.defaultCursor = 'grab';
-        canvas.hoverCursor = 'grab';
+        applyCanvasCursors(canvas, activeTool, { panReady: true });
         if (containerRef.current) {
           containerRef.current.classList.add(styles.panning);
         }
@@ -368,8 +1105,7 @@ export function Canvas() {
       if (event.code === 'Space') {
         spacebarPressedRef.current = false;
         isPanningRef.current = false;
-        canvas.defaultCursor = 'default';
-        canvas.hoverCursor = 'move';
+        applyCanvasCursors(canvas, activeTool);
         if (containerRef.current) {
           containerRef.current.classList.remove(styles.panning);
         }
@@ -382,6 +1118,7 @@ export function Canvas() {
         canvas.selection = false;
         lastPosXRef.current = (event.e as any).clientX;
         lastPosYRef.current = (event.e as any).clientY;
+        applyCanvasCursors(canvas, activeTool, { grabbing: true });
       }
     };
 
@@ -402,7 +1139,12 @@ export function Canvas() {
     const handleMouseUp = () => {
       if (isPanningRef.current) {
         isPanningRef.current = false;
-        canvas.selection = activeTool !== 'pen';
+        canvas.selection = shouldEnableSelection(activeTool);
+        if (spacebarPressedRef.current) {
+          applyCanvasCursors(canvas, activeTool, { panReady: true });
+        } else {
+          applyCanvasCursors(canvas, activeTool);
+        }
       }
     };
 
@@ -421,17 +1163,12 @@ export function Canvas() {
     };
   }, [canvas, activeTool]);
 
-  // Handle zoom with Ctrl+mouse wheel
+  // Handle trackpad/mouse wheel zoom (no modifier required)
   useEffect(() => {
     if (!canvas) return;
 
     const handleWheel = (opt: fabric.TPointerEventInfo<WheelEvent>) => {
       const event = opt.e;
-
-      // Only zoom when Ctrl/Cmd is pressed
-      if (!event.ctrlKey && !event.metaKey) {
-        return;
-      }
 
       event.preventDefault();
       event.stopPropagation();
@@ -440,11 +1177,9 @@ export function Canvas() {
       let newZoom = canvas.getZoom();
       newZoom *= 0.999 ** delta;
 
-      // Limit zoom range
-      if (newZoom > 5) newZoom = 5;
-      if (newZoom < 0.1) newZoom = 0.1;
+      if (newZoom > MAX_ZOOM) newZoom = MAX_ZOOM;
+      if (newZoom < MIN_ZOOM) newZoom = MIN_ZOOM;
 
-      // Zoom to mouse pointer position
       const point = new fabric.Point(event.offsetX, event.offsetY);
       canvas.zoomToPoint(point, newZoom);
       setZoom(newZoom);
@@ -457,9 +1192,70 @@ export function Canvas() {
     };
   }, [canvas, setZoom]);
 
+  // Handle Safari trackpad pinch gestures
+  useEffect(() => {
+    if (!canvas || !containerRef.current) return;
+
+    type GestureEventLike = Event & {
+      scale?: number;
+      clientX?: number;
+      clientY?: number;
+    };
+
+    const element = containerRef.current;
+
+    const handleGestureStart = (event: Event) => {
+      const gestureEvent = event as GestureEventLike;
+      if (typeof gestureEvent.scale !== 'number') return;
+      event.preventDefault();
+      gestureScaleRef.current = gestureEvent.scale;
+    };
+
+    const handleGestureChange = (event: Event) => {
+      const gestureEvent = event as GestureEventLike;
+      if (typeof gestureEvent.scale !== 'number') return;
+
+      event.preventDefault();
+      const previousScale = gestureScaleRef.current || gestureEvent.scale;
+      const zoomFactor = gestureEvent.scale / previousScale;
+      gestureScaleRef.current = gestureEvent.scale;
+
+      let newZoom = canvas.getZoom() * zoomFactor;
+      if (newZoom > MAX_ZOOM) newZoom = MAX_ZOOM;
+      if (newZoom < MIN_ZOOM) newZoom = MIN_ZOOM;
+
+      const rect = element.getBoundingClientRect();
+      const x = typeof gestureEvent.clientX === 'number'
+        ? gestureEvent.clientX - rect.left
+        : rect.width / 2;
+      const y = typeof gestureEvent.clientY === 'number'
+        ? gestureEvent.clientY - rect.top
+        : rect.height / 2;
+
+      canvas.zoomToPoint(new fabric.Point(x, y), newZoom);
+      setZoom(newZoom);
+    };
+
+    const handleGestureEnd = () => {
+      gestureScaleRef.current = 1;
+    };
+
+    element.addEventListener('gesturestart', handleGestureStart, { passive: false });
+    element.addEventListener('gesturechange', handleGestureChange, { passive: false });
+    element.addEventListener('gestureend', handleGestureEnd);
+
+    return () => {
+      element.removeEventListener('gesturestart', handleGestureStart);
+      element.removeEventListener('gesturechange', handleGestureChange);
+      element.removeEventListener('gestureend', handleGestureEnd);
+    };
+  }, [canvas, setZoom]);
+
   // Handle keyboard shortcuts (undo/redo, zoom, and tool selection)
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+
       // Don't trigger shortcuts when typing in inputs
       if (
         document.activeElement?.tagName === 'INPUT' ||
@@ -469,7 +1265,7 @@ export function Canvas() {
       }
 
       // Undo: Ctrl+Z (Windows/Linux) or Cmd+Z (Mac)
-      if ((event.ctrlKey || event.metaKey) && event.key === 'z' && !event.shiftKey) {
+      if ((event.ctrlKey || event.metaKey) && key === 'z' && !event.shiftKey) {
         event.preventDefault();
         undo();
         return;
@@ -477,44 +1273,94 @@ export function Canvas() {
 
       // Redo: Ctrl+Shift+Z or Ctrl+Y (Windows/Linux) or Cmd+Shift+Z (Mac)
       if (
-        ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key === 'z') ||
-        ((event.ctrlKey || event.metaKey) && event.key === 'y')
+        ((event.ctrlKey || event.metaKey) && event.shiftKey && key === 'z') ||
+        ((event.ctrlKey || event.metaKey) && key === 'y')
       ) {
         event.preventDefault();
         redo();
         return;
       }
 
-      // Zoom in: Ctrl+Plus or Ctrl+=
-      if ((event.ctrlKey || event.metaKey) && (event.key === '+' || event.key === '=')) {
+      // Zoom in: Ctrl/Cmd + Plus/Equal (including numpad)
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        (event.key === '+' || event.key === '=' || event.code === 'NumpadAdd')
+      ) {
         event.preventDefault();
         if (!canvas) return;
-        const newZoom = Math.min(zoom * 1.2, 5);
+        const newZoom = Math.min(zoom * 1.2, MAX_ZOOM);
         setZoom(newZoom);
         canvas.setZoom(newZoom);
         canvas.renderAll();
         return;
       }
 
-      // Zoom out: Ctrl+Minus
-      if ((event.ctrlKey || event.metaKey) && (event.key === '-' || event.key === '_')) {
+      // Zoom out: Ctrl/Cmd + Minus (including numpad)
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        (event.key === '-' || event.key === '_' || event.code === 'NumpadSubtract')
+      ) {
         event.preventDefault();
         if (!canvas) return;
-        const newZoom = Math.max(zoom / 1.2, 0.1);
+        const newZoom = Math.max(zoom / 1.2, MIN_ZOOM);
         setZoom(newZoom);
         canvas.setZoom(newZoom);
         canvas.renderAll();
         return;
       }
 
-      // Reset zoom: Ctrl+0
-      if ((event.ctrlKey || event.metaKey) && event.key === '0') {
+      // Reset zoom: Ctrl/Cmd + 0 (including numpad)
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        (event.key === '0' || event.code === 'Numpad0')
+      ) {
         event.preventDefault();
         if (!canvas) return;
         setZoom(1);
         canvas.setZoom(1);
         canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
         canvas.renderAll();
+        return;
+      }
+
+      // Typing with a sticky selected should start editing and replace placeholder text.
+      if (selectedSticky && isPlainTypingKey(event)) {
+        event.preventDefault();
+        handleStickyTypeKey(event.key);
+        return;
+      }
+
+      // Edit selected sticky note: Enter
+      if (!event.ctrlKey && !event.metaKey && event.key === 'Enter' && selectedSticky) {
+        event.preventDefault();
+        handleStickyEdit();
+        return;
+      }
+
+      // Arrow keys pan the viewport (Shift for faster pan)
+      if (
+        event.key === 'ArrowUp' ||
+        event.key === 'ArrowDown' ||
+        event.key === 'ArrowLeft' ||
+        event.key === 'ArrowRight'
+      ) {
+        event.preventDefault();
+        const panStep = event.shiftKey ? KEYBOARD_PAN_STEP_FAST : KEYBOARD_PAN_STEP;
+
+        switch (event.key) {
+          case 'ArrowUp':
+            panViewportBy(0, panStep);
+            break;
+          case 'ArrowDown':
+            panViewportBy(0, -panStep);
+            break;
+          case 'ArrowLeft':
+            panViewportBy(panStep, 0);
+            break;
+          case 'ArrowRight':
+            panViewportBy(-panStep, 0);
+            break;
+        }
         return;
       }
 
@@ -549,13 +1395,21 @@ export function Canvas() {
             event.preventDefault();
             setActiveTool('line');
             break;
+          case 'a':
+            event.preventDefault();
+            setActiveTool('arrow');
+            break;
+          case 'd':
+            event.preventDefault();
+            setActiveTool('diamond');
+            break;
           case 'n':
             event.preventDefault();
-            setActiveTool('sticky');
+            setActiveTool(activeTool === 'sticky' ? 'select' : 'sticky');
             break;
           case 'i':
             event.preventDefault();
-            setActiveTool('image');
+            window.dispatchEvent(new Event(OPEN_IMAGE_PICKER_EVENT));
             break;
         }
       }
@@ -566,11 +1420,70 @@ export function Canvas() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [undo, redo, setActiveTool, canvas, zoom, setZoom]);
+  }, [
+    undo,
+    redo,
+    setActiveTool,
+    activeTool,
+    canvas,
+    zoom,
+    setZoom,
+    panViewportBy,
+    selectedSticky,
+    handleStickyEdit,
+    handleStickyTypeKey,
+  ]);
 
   return (
-    <div ref={containerRef} className={styles.container}>
+    <div ref={containerRef} className={styles.container} style={canvasSizingStyle}>
       <canvas ref={canvasRef} />
+      <input
+        ref={imageFileInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/gif,image/webp"
+        className={styles.hiddenFileInput}
+        onChange={handleImageFileInputChange}
+      />
+
+      {activeTool === 'sticky' && (
+        <div className={styles.modeHint} role="status" aria-live="polite">
+          Pick a color, then click anywhere to place a sticky note.
+        </div>
+      )}
+
+      {activeTool === 'sticky' && (
+        <div className={styles.stickyPlacementPalette} role="region" aria-label="Sticky note colors">
+          <div className={styles.stickyPlacementGrid}>
+            {STICKY_NOTE_COLORS.map((color) => (
+              <button
+                key={color}
+                type="button"
+                className={`${styles.stickyPlacementColor} ${
+                  stickyPlacementColor.toLowerCase() === color.toLowerCase()
+                    ? styles.stickyPlacementColorActive
+                    : ''
+                }`}
+                style={{ backgroundColor: color }}
+                onClick={() => setStickyPlacementColor(color)}
+                title={`Sticky color ${color}`}
+                aria-label={`Sticky color ${color}`}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {imagePasteNotice && (
+        <div
+          className={`${styles.pasteNotice} ${
+            imagePasteNotice.type === 'error' ? styles.pasteNoticeError : styles.pasteNoticeSuccess
+          }`}
+          role="status"
+          aria-live="polite"
+        >
+          {imagePasteNotice.message}
+        </div>
+      )}
 
       {/* Contextual delete button */}
       {hasSelection && (

@@ -11,6 +11,12 @@
   --text-muted: #999999;
   --accent: #000000;
   --accent-hover: #333333;
+  --grid-minor-rgb: 0 0 0;
+  --grid-major-rgb: 0 0 0;
+  --grid-minor-opacity: 0.04;
+  --grid-major-opacity: 0.085;
+  --grid-minor: rgb(var(--grid-minor-rgb) / var(--grid-minor-opacity));
+  --grid-major: rgb(var(--grid-major-rgb) / var(--grid-major-opacity));
 
   /* Spacing - generous like RemoteOk */
   --spacing-xs: 4px;
@@ -40,6 +46,12 @@
   --text-muted: #666666;
   --accent: #ffffff;
   --accent-hover: #e0e0e0;
+  --grid-minor-rgb: 255 255 255;
+  --grid-major-rgb: 255 255 255;
+  --grid-minor-opacity: 0.04;
+  --grid-major-opacity: 0.085;
+  --grid-minor: rgb(var(--grid-minor-rgb) / var(--grid-minor-opacity));
+  --grid-major: rgb(var(--grid-major-rgb) / var(--grid-major-opacity));
 }
 
 /* Reset */
@@ -292,5 +304,5 @@ input::placeholder, textarea::placeholder {
   position: relative;
   width: 100%;
   height: 100%;
-  background: var(--bg);
+  background: transparent;
 }

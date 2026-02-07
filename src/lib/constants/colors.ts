@@ -1,27 +1,21 @@
 export const USER_COLORS = [
   '#ef4444', // red
-  '#f97316', // orange
-  '#f59e0b', // amber
-  '#10b981', // emerald
-  '#14b8a6', // teal
-  '#06b6d4', // cyan
+  '#f59e0b', // orange
+  '#eab308', // yellow
+  '#22c55e', // green
   '#3b82f6', // blue
-  '#6366f1', // indigo
-  '#8b5cf6', // violet
+  '#8b5cf6', // purple
   '#ec4899', // pink
 ];
 
+// Reduced to widely used annotation colors
 export const DRAWING_COLORS = [
   '#000000', // black
-  '#ffffff', // white
   '#ef4444', // red
-  '#f97316', // orange
   '#f59e0b', // amber
   '#eab308', // yellow
-  '#10b981', // emerald
-  '#06b6d4', // cyan
+  '#22c55e', // green
   '#3b82f6', // blue
-  '#6366f1', // indigo
   '#8b5cf6', // violet
   '#ec4899', // pink
 ];
