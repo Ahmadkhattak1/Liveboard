@@ -1,16 +1,26 @@
 export interface BoardMetadata {
   id: string;
   title?: string;
+  emoji?: string;
   createdAt: number;
   createdBy: string;
   updatedAt: number;
   isPublic: boolean;
 }
 
+export interface SerializedCanvasState {
+  version?: string;
+  objects?: unknown[];
+  [key: string]: unknown;
+}
+
 export interface BoardCanvas {
   version: string;
-  objects: CanvasObjectData[];
-  background: string;
+  objects: unknown[];
+  background?: string;
+  updatedAt?: number;
+  updatedBy?: string;
+  [key: string]: unknown;
 }
 
 export interface CanvasObjectData {
@@ -51,6 +61,15 @@ export interface UserPresence {
   };
   lastSeen: number;
   isActive: boolean;
+  activity?: {
+    tool?: string;
+    isDrawing?: boolean;
+    trail?: Array<{
+      x: number;
+      y: number;
+    }>;
+    updatedAt?: number;
+  };
 }
 
 export interface BoardOperation {

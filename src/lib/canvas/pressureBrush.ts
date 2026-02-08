@@ -4,6 +4,8 @@ const MIN_PRESSURE_FACTOR = 0.45;
 const MAX_PRESSURE_FACTOR = 1.75;
 const SPEED_LIMIT = 2.2; // px/ms
 const WIDTH_SMOOTHING = 0.22;
+const CURVE_SEGMENT_LENGTH = 1.9;
+const MIN_SAMPLE_DISTANCE_SQ = 0.05;
 
 /**
  * Smoother real-time pressure brush:
@@ -11,6 +13,11 @@ const WIDTH_SMOOTHING = 0.22;
  * - Falls back to speed-based pressure simulation
  * - Smooths width transitions while drawing (mouse down -> move)
  */
+interface StrokeSample {
+  point: fabric.Point;
+  width: number;
+}
+
 export class PressureBrush extends fabric.PencilBrush {
   public baseWidth: number;
   private pointWidths: number[] = [];
@@ -74,6 +81,157 @@ export class PressureBrush extends fabric.PencilBrush {
 
   private getWidthAt(index: number): number {
     return this.pointWidths[index] ?? this.filteredWidth ?? this.baseWidth;
+  }
+
+  private clampWidth(width: number): number {
+    const minWidth = Math.max(0.2, this.baseWidth * MIN_PRESSURE_FACTOR * 0.7);
+    const maxWidth = Math.max(this.baseWidth, this.baseWidth * MAX_PRESSURE_FACTOR * 1.35);
+    return Math.min(maxWidth, Math.max(minWidth, width));
+  }
+
+  private compactSamples(samples: StrokeSample[]): StrokeSample[] {
+    if (samples.length <= 1) {
+      return samples;
+    }
+
+    const compacted: StrokeSample[] = [samples[0]];
+
+    for (let i = 1; i < samples.length; i++) {
+      const previous = compacted[compacted.length - 1];
+      const current = samples[i];
+      const dx = current.point.x - previous.point.x;
+      const dy = current.point.y - previous.point.y;
+      if (dx * dx + dy * dy < MIN_SAMPLE_DISTANCE_SQ) {
+        previous.width = (previous.width + current.width) * 0.5;
+        continue;
+      }
+      compacted.push(current);
+    }
+
+    const tail = samples[samples.length - 1];
+    const compactedTail = compacted[compacted.length - 1];
+    if (!compactedTail.point.eq(tail.point)) {
+      compacted.push(tail);
+    } else {
+      compactedTail.width = tail.width;
+    }
+
+    return compacted;
+  }
+
+  private pushLinearSamples(
+    samples: StrokeSample[],
+    start: StrokeSample,
+    end: StrokeSample
+  ): void {
+    const distance = start.point.distanceFrom(end.point);
+    const steps = Math.max(1, Math.ceil(distance / CURVE_SEGMENT_LENGTH));
+
+    for (let step = 1; step <= steps; step++) {
+      const t = step / steps;
+      const x = start.point.x + (end.point.x - start.point.x) * t;
+      const y = start.point.y + (end.point.y - start.point.y) * t;
+      const width = this.clampWidth(start.width + (end.width - start.width) * t);
+      samples.push({
+        point: new fabric.Point(x, y),
+        width,
+      });
+    }
+  }
+
+  private pushQuadraticSamples(
+    samples: StrokeSample[],
+    start: StrokeSample,
+    control: StrokeSample,
+    end: StrokeSample
+  ): void {
+    const approxLength =
+      start.point.distanceFrom(control.point) + control.point.distanceFrom(end.point);
+    const steps = Math.max(1, Math.ceil(approxLength / CURVE_SEGMENT_LENGTH));
+
+    for (let step = 1; step <= steps; step++) {
+      const t = step / steps;
+      const invT = 1 - t;
+      const x =
+        invT * invT * start.point.x +
+        2 * invT * t * control.point.x +
+        t * t * end.point.x;
+      const y =
+        invT * invT * start.point.y +
+        2 * invT * t * control.point.y +
+        t * t * end.point.y;
+      const width = this.clampWidth(start.width + (end.width - start.width) * t);
+      samples.push({
+        point: new fabric.Point(x, y),
+        width,
+      });
+    }
+  }
+
+  private buildInterpolatedSamples(): StrokeSample[] {
+    if (!this._points || this._points.length === 0) {
+      return [];
+    }
+
+    const rawSamples: StrokeSample[] = this._points.map((point, index) => ({
+      point,
+      width: this.clampWidth(this.getWidthAt(index)),
+    }));
+
+    if (rawSamples.length < 3) {
+      return this.compactSamples(rawSamples);
+    }
+
+    const interpolated: StrokeSample[] = [rawSamples[0]];
+    let segmentStart: StrokeSample = rawSamples[0];
+
+    for (let i = 1; i < rawSamples.length; i++) {
+      const control = rawSamples[i - 1];
+      const target = rawSamples[i];
+      const midpoint = control.point.midPointFrom(target.point);
+      const midpointSample: StrokeSample = {
+        point: midpoint,
+        width: this.clampWidth((control.width + target.width) * 0.5),
+      };
+
+      this.pushQuadraticSamples(interpolated, segmentStart, control, midpointSample);
+      segmentStart = midpointSample;
+    }
+
+    this.pushLinearSamples(interpolated, segmentStart, rawSamples[rawSamples.length - 1]);
+    return this.compactSamples(interpolated);
+  }
+
+  private renderDot(ctx: CanvasRenderingContext2D, sample: StrokeSample): void {
+    const radius = sample.width / 2;
+    ctx.beginPath();
+    ctx.arc(sample.point.x, sample.point.y, radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  private renderSamples(ctx: CanvasRenderingContext2D, samples: StrokeSample[]): void {
+    if (samples.length === 1) {
+      this.renderDot(ctx, samples[0]);
+      return;
+    }
+
+    for (let i = 1; i < samples.length; i++) {
+      const start = samples[i - 1];
+      const end = samples[i];
+      if (start.point.eq(end.point)) {
+        continue;
+      }
+
+      ctx.lineWidth = (start.width + end.width) * 0.5;
+      ctx.beginPath();
+      ctx.moveTo(start.point.x, start.point.y);
+      ctx.lineTo(end.point.x, end.point.y);
+      ctx.stroke();
+    }
+
+    // Ensure rounded stroke ends are always fully opaque.
+    this.renderDot(ctx, samples[0]);
+    this.renderDot(ctx, samples[samples.length - 1]);
   }
 
   private calculateDynamicWidth(
@@ -158,6 +316,11 @@ export class PressureBrush extends fabric.PencilBrush {
       return;
     }
 
+    const samples = this.buildInterpolatedSamples();
+    if (samples.length === 0) {
+      return;
+    }
+
     this._saveAndTransform(ctx);
     ctx.strokeStyle = this.color;
     ctx.fillStyle = this.color;
@@ -165,47 +328,7 @@ export class PressureBrush extends fabric.PencilBrush {
     ctx.lineJoin = this.strokeLineJoin;
     ctx.miterLimit = this.strokeMiterLimit;
     ctx.setLineDash(this.strokeDashArray || []);
-
-    if (this._points.length === 1) {
-      const point = this._points[0];
-      const radius = this.getWidthAt(0) / 2;
-      ctx.beginPath();
-      ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-      return;
-    }
-
-    for (let i = 1; i < this._points.length; i++) {
-      const p1 = this._points[i - 1];
-      const p2 = this._points[i];
-      const w1 = this.getWidthAt(i - 1);
-      const w2 = this.getWidthAt(i);
-
-      const dx = p2.x - p1.x;
-      const dy = p2.y - p1.y;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      const steps = Math.max(1, Math.ceil(distance / 2));
-      let prevX = p1.x;
-      let prevY = p1.y;
-
-      for (let step = 1; step <= steps; step++) {
-        const t = step / steps;
-        const x = p1.x + dx * t;
-        const y = p1.y + dy * t;
-        const width = w1 + (w2 - w1) * t;
-
-        ctx.lineWidth = width;
-        ctx.beginPath();
-        ctx.moveTo(prevX, prevY);
-        ctx.lineTo(x, y);
-        ctx.stroke();
-
-        prevX = x;
-        prevY = y;
-      }
-    }
-
+    this.renderSamples(ctx, samples);
     ctx.restore();
   }
 
@@ -218,15 +341,21 @@ export class PressureBrush extends fabric.PencilBrush {
       return;
     }
 
+    const samples = this.buildInterpolatedSamples();
+    if (samples.length === 0) {
+      this.canvas.requestRenderAll();
+      return;
+    }
+
     const segments: Array<fabric.Line | fabric.Circle> = [];
 
-    if (this._points.length === 1) {
-      const point = this._points[0];
-      const radius = this.getWidthAt(0) / 2;
+    if (samples.length === 1) {
+      const sample = samples[0];
+      const radius = sample.width / 2;
       segments.push(
         new fabric.Circle({
-          left: point.x - radius,
-          top: point.y - radius,
+          left: sample.point.x - radius,
+          top: sample.point.y - radius,
           radius,
           fill: this.color,
           stroke: undefined,
@@ -235,18 +364,18 @@ export class PressureBrush extends fabric.PencilBrush {
         })
       );
     } else {
-      for (let i = 1; i < this._points.length; i++) {
-        const p1 = this._points[i - 1];
-        const p2 = this._points[i];
+      for (let i = 1; i < samples.length; i++) {
+        const start = samples[i - 1];
+        const end = samples[i];
 
-        if (p1.eq(p2)) {
+        if (start.point.eq(end.point)) {
           continue;
         }
 
-        const width = (this.getWidthAt(i - 1) + this.getWidthAt(i)) / 2;
+        const width = (start.width + end.width) * 0.5;
 
         segments.push(
-          new fabric.Line([p1.x, p1.y, p2.x, p2.y], {
+          new fabric.Line([start.point.x, start.point.y, end.point.x, end.point.y], {
             stroke: this.color,
             strokeWidth: width,
             strokeLineCap: this.strokeLineCap,
@@ -255,6 +384,22 @@ export class PressureBrush extends fabric.PencilBrush {
             strokeDashArray: this.strokeDashArray,
             fill: undefined,
             strokeUniform: true,
+            selectable: false,
+            evented: false,
+          })
+        );
+      }
+
+      if (segments.length === 0) {
+        const sample = samples[samples.length - 1];
+        const radius = sample.width / 2;
+        segments.push(
+          new fabric.Circle({
+            left: sample.point.x - radius,
+            top: sample.point.y - radius,
+            radius,
+            fill: this.color,
+            stroke: undefined,
             selectable: false,
             evented: false,
           })

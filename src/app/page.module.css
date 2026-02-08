@@ -1,60 +1,748 @@
-.container {
+.page {
+  min-height: 100vh;
+  padding-top: 112px;
+  background: #ececec;
+  color: #111111;
+}
+
+.page button,
+.page a,
+.authGate button,
+.authGate a {
+  transition: none !important;
+}
+
+.loadingPage,
+.authGate {
+  min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 100vh;
-  background: var(--bg);
+  background: #ececec;
+  padding: 16px;
 }
 
-.content {
+.loadingContent {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 20px;
-  text-align: center;
-  max-width: 500px;
-  padding: 48px;
+  gap: 14px;
 }
 
-.errorContainer {
+.loadingText {
+  margin: 0;
+  font-size: 13px;
+  color: #555555;
+}
+
+.authCard {
+  width: min(560px, 100%);
+  border: 1.5px solid #111111;
+  border-radius: 18px;
+  background: #f6f6f6;
+  padding: 24px;
+}
+
+.authEyebrow {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #5f5f5f;
+}
+
+.authTitle {
+  margin: 10px 0 0;
+  font-size: 30px;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+}
+
+.authText {
+  margin: 12px 0 0;
+  font-size: 15px;
+  color: #3f3f3f;
+}
+
+.authError {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border: 1.5px solid #111111;
+  border-radius: 12px;
+  background: #ffe6e6;
+  color: #6e1e1e;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.authActions {
+  margin-top: 20px;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 24px;
-  max-width: 520px;
-  text-align: center;
-  padding: 48px;
-  background: var(--bg);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-md);
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
-.emoji {
-  font-size: 56px;
+.authPrimary,
+.authSecondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 2px solid #111111;
+  border-radius: 14px;
+  font-size: 15px;
+  font-weight: 800;
   line-height: 1;
 }
 
-.title {
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--text);
+.authPrimary {
+  background: #0b79b8;
+  color: #ffffff;
+}
+
+.authSecondary {
+  background: #ffffff;
+  color: #111111;
+}
+
+.authPrimary:hover,
+.authSecondary:hover {
+  background: #111111;
+  color: #ffffff;
+}
+
+.actionIsland {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 20;
+}
+
+.createButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+  padding: 0 18px;
+  border: 2px solid #111111;
+  border-radius: 15px;
+  background: #ffffff;
+  color: #111111;
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.createButton:hover {
+  background: #111111;
+  color: #ffffff;
+}
+
+.createButton:disabled {
+  opacity: 0.55;
+}
+
+.profileIsland {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  z-index: 20;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1.5px solid #111111;
+  border-radius: 13px;
+  background: #ffffff;
+}
+
+.profileName {
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.profileType {
+  font-size: 11px;
+  color: #5e5e5e;
+  line-height: 1;
+}
+
+.main {
+  width: min(1120px, calc(100% - 24px));
+  margin: 0 auto 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.errorBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1.5px solid #111111;
+  border-radius: 14px;
+  background: #ffe6e6;
+  color: #6e1e1e;
+  font-size: 13px;
+}
+
+.errorBanner p {
   margin: 0;
 }
 
-.message {
-  color: var(--text-secondary);
-  font-size: 14px;
-  line-height: 1.6;
-}
-
-.status {
-  color: var(--text-secondary);
-  font-size: 14px;
-}
-
-.buttonGroup {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
+.retryButton {
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 2px solid #111111;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #111111;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.retryButton:hover {
+  background: #111111;
+  color: #ffffff;
+}
+
+.emptyPanel {
+  padding: 48px 24px;
+  border: 1.5px dashed #111111;
+  border-radius: 18px;
+  background: #f5f5f5;
+  text-align: center;
+}
+
+.emptyTitle {
+  margin: 0;
+  font-size: 28px;
+  letter-spacing: -0.03em;
+}
+
+.emptyText {
+  margin: 10px auto 0;
+  max-width: 660px;
+  font-size: 15px;
+  color: #575757;
+}
+
+.emptyButton {
+  margin-top: 18px;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 2px solid #111111;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #111111;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.emptyButton:hover {
+  background: #111111;
+  color: #ffffff;
+}
+
+.emptyButton:disabled {
+  opacity: 0.55;
+}
+
+.cardStack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.boardRow {
+  position: relative;
+  padding-right: 58px;
+  overflow: visible;
+}
+
+.boardCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 20px 16px;
+  border: 1.25px solid #111111;
+  border-radius: 16px;
+  width: calc(100% + 58px);
+  transform: translateX(0);
+  transition: transform 250ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.boardRowEdgeActive .boardCard {
+  transform: translateX(-58px);
+}
+
+.cardContent {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.toneBlue {
+  background: #0b79b8;
+  color: #ffffff;
+}
+
+.toneYellow {
+  background: #e8de7a;
+  color: #111111;
+}
+
+.toneTeal {
+  background: #62c2c6;
+  color: #111111;
+}
+
+.cardMain {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.titleRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.emojiPickerWrap {
+  flex: 0 0 auto;
+}
+
+.emojiBadge {
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0.9px solid #111111;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #111111;
+  font-size: 31px;
+  line-height: 1;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  cursor: pointer;
+}
+
+.titleBlock {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.emojiModalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(17, 17, 17, 0.14);
+}
+
+.emojiModalCard {
+  width: min(560px, 100%);
+  max-height: calc(100vh - 24px);
+  overflow: hidden;
+  border: 1.25px solid #111111;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.emojiModalHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 0;
+  background: #f8f8f8;
+}
+
+.emojiModalTitle {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.emojiModalSubtitle {
+  margin: 5px 0 0;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: #5f5f5f;
+}
+
+.emojiModalClose {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1.5px solid #111111;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #111111;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.emojiModalClose:hover {
+  background: #111111;
+  color: #ffffff;
+}
+
+.emojiModalClose:disabled {
+  opacity: 0.55;
+}
+
+.emojiModalPicker {
+  padding: 10px;
+}
+
+.emojiModalPicker :global(.EmojiPickerReact) {
+  --epr-bg-color: #ffffff;
+  --epr-category-label-bg-color: #ffffff;
+  --epr-category-label-text-color: #111111;
+  --epr-hover-bg-color: #f2f2f2;
+  --epr-focus-bg-color: #f2f2f2;
+  --epr-search-border-color: #111111;
+  --epr-search-input-bg-color: #ffffff;
+  --epr-search-input-text-color: #111111;
+  --epr-search-placeholder-color: #666666;
+  --epr-picker-border-color: #111111;
+  --epr-emoji-size: 24px;
+  border: 1.25px solid #111111 !important;
+  border-top: 0 !important;
+  border-radius: 0 0 14px 14px !important;
+  box-shadow: none !important;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  position: relative;
+}
+
+.emojiModalPicker :global(.EmojiPickerReact *),
+.emojiModalPicker :global(.epr-emoji-category-label),
+.emojiModalPicker :global(.epr-body),
+.emojiModalPicker :global(.epr-header-overlay),
+.emojiModalPicker :global(.epr-search-container input) {
+  transition: none !important;
+}
+
+.emojiModalPicker :global(.epr-header) {
+  position: static !important;
+}
+
+.emojiModalPicker :global(.epr-category-nav) {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  padding: 10px 12px;
+  border-top: 1.25px solid #111111;
+  background: #ffffff;
+}
+
+.emojiModalPicker :global(.epr-body) {
+  padding-bottom: 56px;
+}
+
+.cardTitle {
+  margin: 0;
+  font-size: 27px;
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cardSide {
+  display: flex;
+  min-width: 124px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.edgeTriggerZone {
+  position: absolute;
+  top: -4px;
+  right: -26px;
+  width: 26px;
+  height: calc(100% + 8px);
+  background: transparent;
+}
+
+.edgeActions {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(10px, -50%) scale(0.98);
+  transition: opacity 250ms ease, transform 250ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.boardRowEdgeActive .edgeActions {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(0, -50%) scale(1);
+}
+
+.edgeActionButton {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #111111;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #111111;
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1;
+  position: relative;
+}
+
+.edgeActionButton::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  right: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 8px 14px;
+  background: #ffffff;
+  color: #0f172a;
+  border: 1px solid #d4d9e0;
+  border-radius: 999px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.edgeActionButton:hover::after,
+.edgeActionButton:focus-visible::after {
+  opacity: 1;
+}
+
+.edgeActionShare:hover {
+  background: #111111;
+  color: #ffffff;
+}
+
+.edgeActionDelete:hover {
+  background: #111111;
+  color: #ffffff;
+}
+
+.edgeActionButton:disabled {
+  opacity: 0.55;
+}
+
+.updatedText {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.15;
+  opacity: 0.86;
+}
+
+.openButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 2px solid #111111;
+  background: #ffffff;
+  color: #111111;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.boardCard:hover .openButton,
+.boardCard:focus-within .openButton {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.boardRowEdgeActive .openButton {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.openButton:hover {
+  background: #111111;
+  color: #ffffff;
+  border-color: #111111;
+}
+
+.refreshingRow {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #666666;
+}
+
+@media (max-width: 760px) {
+  .actionIsland {
+    top: 10px;
+    right: 10px;
+  }
+
+  .profileIsland {
+    top: 10px;
+    left: 10px;
+  }
+
+  .createButton {
+    min-height: 40px;
+    padding: 0 12px;
+    font-size: 14px;
+  }
+
+  .main {
+    width: calc(100% - 14px);
+    margin-top: 0;
+  }
+
+  .boardRow {
+    padding-right: 0;
+  }
+
+  .boardCard {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 16px 12px;
+    width: 100%;
+    transform: none !important;
+    transition: none;
+  }
+
+  .cardContent {
+    width: 100%;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    transform: none !important;
+    transition: none;
+  }
+
+  .cardTitle {
+    font-size: 20px;
+    white-space: normal;
+  }
+
+  .titleRow {
+    gap: 8px;
+  }
+
+  .emojiBadge {
+    width: 46px;
+    height: 46px;
+    font-size: 25px;
+  }
+
+  .updatedText {
+    font-size: 12px;
+  }
+
+  .emojiModalBackdrop {
+    padding: 10px;
+  }
+
+  .emojiModalCard {
+    width: 100%;
+    max-height: calc(100vh - 14px);
+    border-radius: 16px;
+  }
+
+  .emojiModalHeader {
+    padding: 12px;
+  }
+
+  .emojiModalTitle {
+    font-size: 16px;
+  }
+
+  .emojiModalSubtitle {
+    font-size: 11px;
+  }
+
+  .emojiModalClose {
+    min-height: 32px;
+    font-size: 12px;
+  }
+
+  .emojiModalPicker {
+    padding: 8px;
+  }
+
+  .cardSide {
+    align-items: flex-start;
+    min-width: 0;
+  }
+
+  .edgeActions {
+    position: static;
+    margin-left: auto;
+    flex-direction: column;
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+    transition: none;
+  }
+
+  .edgeTriggerZone {
+    display: none;
+  }
+
+  .openButton {
+    min-height: 34px;
+    font-size: 13px;
+    padding: 0 12px;
+    opacity: 1;
+    pointer-events: auto;
+  }
 }

@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import * as fabric from 'fabric';
+import { useParams } from 'next/navigation';
 import { useCanvas } from './CanvasProvider';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { initializeFabricCanvas, resizeCanvas } from '@/lib/canvas/fabricCanvas';
@@ -30,8 +31,21 @@ import {
 } from '@/lib/canvas/stickyNotes';
 import { PressureBrush } from '@/lib/canvas/pressureBrush';
 import { addImageFromFile } from '@/lib/canvas/imageTools';
+import {
+  getUserProfile,
+  removePresence,
+  saveBoardCanvasState,
+  subscribeToBoardCanvas,
+  subscribeToPresence,
+  updatePresence,
+  updatePresenceFields,
+} from '@/lib/firebase/database';
+import { serializeCanvas, stringifyCanvasState } from '@/lib/canvas/serialization';
 import { APP_CONFIG, CANVAS_CONFIG } from '@/lib/constants/config';
+import { generateObjectId } from '@/lib/utils/generateId';
 import { validateImageDimensions, validateImageFile } from '@/lib/utils/validators';
+import { BoardCanvas, UserPresence } from '@/types/board';
+import { loginAnonymously } from '@/lib/firebase/auth';
 import styles from './Canvas.module.css';
 
 function shouldEnableSelection(tool: string): boolean {
@@ -115,20 +129,136 @@ const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 5;
 const KEYBOARD_PAN_STEP = 80;
 const KEYBOARD_PAN_STEP_FAST = 220;
-const GRID_MINOR_BASE = 20;
-const GRID_MAJOR_BASE = 100;
-const GRID_MINOR_MIN_SCREEN_SPACING = 24;
-const GRID_MAJOR_MIN_SCREEN_SPACING = 120;
-const GRID_MINOR_FADE_START = 9;
-const GRID_MINOR_FADE_END = 18;
-const GRID_MAJOR_FADE_START = 16;
-const GRID_MAJOR_FADE_END = 36;
-const GRID_MAJOR_MIN_VISIBILITY = 0.42;
+const GRID_MINOR_BASE = 16;
+const GRID_MINOR_MIN_SCREEN_SPACING = 18;
 const IMAGE_PASTE_OFFSET = 24;
 const IMAGE_PASTE_NOTICE_TIMEOUT_MS = 3800;
+const CANVAS_SYNC_DEBOUNCE_MS = 220;
+const HYDRATION_OVERLAY_DELAY_MS = 220;
+const CURSOR_SYNC_INTERVAL_MS = 80;
+const DRAW_TRAIL_SYNC_INTERVAL_MS = 80;
+const DRAW_TRAIL_MAX_POINTS = 32;
+const DRAW_TRAIL_MIN_DISTANCE = 0.8;
+const REMOTE_CURSOR_TTL_MS = 45_000;
+const CANVAS_CACHE_KEY_PREFIX = 'liveboard-canvas-cache:';
 const OPEN_IMAGE_PICKER_EVENT = 'liveboard:open-image-picker';
 const STICKY_CURSOR =
   'url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2732%27 height=%2732%27 viewBox=%270 0 32 32%27%3E%3Cg fill=%27none%27 fill-rule=%27evenodd%27%3E%3Crect x=%278%27 y=%273%27 width=%2716%27 height=%2726%27 rx=%272.5%27 fill=%27%23F6E46C%27 stroke=%27%232E3A4A%27 stroke-width=%271.8%27/%3E%3Cpath d=%27M19 3v5h5%27 stroke=%27%232E3A4A%27 stroke-width=%271.8%27 stroke-linecap=%27round%27/%3E%3Cpath d=%27M12 13.5h8M12 17.5h6%27 stroke=%27%23515F73%27 stroke-width=%271.5%27 stroke-linecap=%27round%27/%3E%3C/g%3E%3C/svg%3E") 5 4, copy';
+
+interface TrackedCanvasObject extends fabric.Object {
+  id?: string;
+  createdBy?: string;
+  createdAt?: number;
+  updatedBy?: string;
+  updatedAt?: number;
+}
+
+interface PresenceIdentity {
+  displayName: string;
+  emoji: string;
+  color: string;
+}
+
+function roundCoordinate(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function ensureTrackedMetadata(
+  object: fabric.Object | undefined,
+  userId: string,
+  options: { touchUpdated?: boolean } = { touchUpdated: true }
+): void {
+  if (!object) {
+    return;
+  }
+
+  const tracked = object as TrackedCanvasObject;
+  const now = Date.now();
+
+  if (!tracked.id) {
+    tracked.id = generateObjectId();
+  }
+
+  if (!tracked.createdBy) {
+    tracked.createdBy = userId;
+  }
+
+  if (typeof tracked.createdAt !== 'number' || !Number.isFinite(tracked.createdAt)) {
+    tracked.createdAt = now;
+  }
+
+  if (options.touchUpdated !== false) {
+    tracked.updatedBy = userId;
+    tracked.updatedAt = now;
+  }
+}
+
+function normalizeBoardCanvasState(value: BoardCanvas | null | undefined): BoardCanvas {
+  const objects = Array.isArray(value?.objects) ? value.objects : [];
+  const version =
+    typeof value?.version === 'string' && value.version.length > 0
+      ? value.version
+      : '6.0.0';
+  const background =
+    typeof value?.background === 'string' ? value.background : '#ffffff';
+
+  return {
+    ...(value ?? {}),
+    version,
+    objects,
+    background,
+  };
+}
+
+function getCanvasCacheKey(boardId: string): string {
+  return `${CANVAS_CACHE_KEY_PREFIX}${boardId}`;
+}
+
+function readCachedBoardCanvas(boardId: string): BoardCanvas | null {
+  if (!boardId || typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(getCanvasCacheKey(boardId));
+    if (!raw) {
+      return null;
+    }
+    return normalizeBoardCanvasState(JSON.parse(raw) as BoardCanvas);
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedBoardCanvas(boardId: string, canvasState: BoardCanvas): void {
+  if (!boardId || typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(
+      getCanvasCacheKey(boardId),
+      stringifyCanvasState(canvasState)
+    );
+  } catch {
+    // Ignore cache write failures (storage quotas, private mode, etc).
+  }
+}
+
+function toViewportCoordinates(
+  canvas: fabric.Canvas,
+  scenePoint: { x: number; y: number }
+): { x: number; y: number } {
+  const vpt = canvas.viewportTransform;
+  if (!vpt) {
+    return scenePoint;
+  }
+
+  return {
+    x: scenePoint.x * vpt[0] + vpt[4],
+    y: scenePoint.y * vpt[3] + vpt[5],
+  };
+}
 
 interface StickySelectionState {
   id: string;
@@ -188,13 +318,6 @@ function getViewportCenterInScene(canvas: fabric.Canvas): { x: number; y: number
     x: (centerX - vpt[4]) / vpt[0],
     y: (centerY - vpt[5]) / vpt[3],
   };
-}
-
-function positiveModulo(value: number, divisor: number): number {
-  if (!Number.isFinite(divisor) || divisor === 0) {
-    return 0;
-  }
-  return ((value % divisor) + divisor) % divisor;
 }
 
 function smoothstep(edge0: number, edge1: number, value: number): number {
@@ -261,7 +384,38 @@ export function Canvas() {
     undo,
     redo,
   } = useCanvas();
-  const { user } = useAuth();
+  const params = useParams<{ boardId: string }>();
+  const { user, loading: authLoading } = useAuth();
+  const boardId = typeof params?.boardId === 'string' ? params.boardId : '';
+  const actorId = user?.id ?? 'guest-user';
+  const syncUserId = user?.id ?? null;
+  const [presenceByUser, setPresenceByUser] = React.useState<Record<string, UserPresence>>({});
+  const [canvasHydrated, setCanvasHydrated] = React.useState(false);
+  const [showHydrationOverlay, setShowHydrationOverlay] = React.useState(false);
+  const [presenceIdentity, setPresenceIdentity] = React.useState<PresenceIdentity>({
+    displayName: user?.displayName || 'Anonymous',
+    emoji: user?.emoji || '👤',
+    color: user?.color || '#2563EB',
+  });
+  const activeToolRef = useRef(activeTool);
+  const [viewportTick, setViewportTick] = React.useState(0);
+  const canvasSyncTimerRef = useRef<number | null>(null);
+  const pendingCanvasPersistRef = useRef<{ state: BoardCanvas; hash: string } | null>(null);
+  const isPersistingCanvasRef = useRef(false);
+  const isApplyingRemoteCanvasRef = useRef(false);
+  const lastCanvasHashRef = useRef<string | null>(null);
+  const cursorFlushTimerRef = useRef<number | null>(null);
+  const queuedCursorRef = useRef<{ x: number; y: number } | null>(null);
+  const lastCursorSentAtRef = useRef(0);
+  const lastCursorSentRef = useRef<{ x: number; y: number } | null>(null);
+  const drawingFlushTimerRef = useRef<number | null>(null);
+  const localDrawingTrailRef = useRef<Array<{ x: number; y: number }>>([]);
+  const lastDrawingSentAtRef = useRef(0);
+  const isLocalDrawingRef = useRef(false);
+  const lastLocalMutationAtRef = useRef(0);
+  const viewportTickThrottleRef = useRef(0);
+  const hasSeenInitialRemoteCanvasRef = useRef(false);
+  const autoLoginAttemptedRef = useRef(false);
   const minCanvasWidth = resolveCanvasConstraint(CANVAS_CONFIG.minWidth, 900);
   const minCanvasHeight = resolveCanvasConstraint(CANVAS_CONFIG.minHeight, 560);
   const maxCanvasWidth = resolveCanvasConstraint(CANVAS_CONFIG.maxWidth, 1800);
@@ -272,6 +426,46 @@ export function Canvas() {
     ['--canvas-max-width' as const]: `${maxCanvasWidth}px`,
     ['--canvas-max-height' as const]: `${maxCanvasHeight}px`,
   } as React.CSSProperties;
+
+  useEffect(() => {
+    if (authLoading || user?.id || autoLoginAttemptedRef.current) {
+      return;
+    }
+
+    autoLoginAttemptedRef.current = true;
+    void loginAnonymously().catch((error) => {
+      console.error('Failed to authenticate anonymous board session:', error);
+      autoLoginAttemptedRef.current = false;
+    });
+  }, [authLoading, user?.id]);
+
+  useEffect(() => {
+    activeToolRef.current = activeTool;
+
+    if (activeTool !== 'pen') {
+      isLocalDrawingRef.current = false;
+      localDrawingTrailRef.current = [];
+      if (drawingFlushTimerRef.current !== null) {
+        window.clearTimeout(drawingFlushTimerRef.current);
+        drawingFlushTimerRef.current = null;
+      }
+    }
+  }, [activeTool]);
+
+  useEffect(() => {
+    if (!boardId || !syncUserId) {
+      return;
+    }
+
+    void updatePresenceFields(boardId, syncUserId, {
+      activity: {
+        tool: activeTool,
+        isDrawing: false,
+        trail: [],
+        updatedAt: Date.now(),
+      },
+    });
+  }, [activeTool, boardId, syncUserId]);
 
   // Initialize canvas
   useEffect(() => {
@@ -303,8 +497,6 @@ export function Canvas() {
     };
   }, [setCanvas]);
 
-  const actorId = user?.id ?? 'guest-user';
-
   useEffect(() => {
     if (!canvas || !containerRef.current) return;
 
@@ -313,48 +505,23 @@ export function Canvas() {
 
       const zoomLevel = Math.max(MIN_ZOOM, canvas.getZoom());
       const rawMinorSize = GRID_MINOR_BASE * zoomLevel;
-      const rawMajorSize = GRID_MAJOR_BASE * zoomLevel;
       const minorSize = Math.max(
         1,
         softClampGridSize(rawMinorSize, GRID_MINOR_MIN_SCREEN_SPACING)
-      );
-      const majorSize = Math.max(
-        1,
-        softClampGridSize(rawMajorSize, GRID_MAJOR_MIN_SCREEN_SPACING)
-      );
-      const minorVisibility = smoothstep(
-        GRID_MINOR_FADE_START,
-        GRID_MINOR_FADE_END,
-        rawMinorSize
-      );
-      const majorVisibility = GRID_MAJOR_MIN_VISIBILITY + (1 - GRID_MAJOR_MIN_VISIBILITY) * smoothstep(
-        GRID_MAJOR_FADE_START,
-        GRID_MAJOR_FADE_END,
-        rawMajorSize
       );
       const vpt = canvas.viewportTransform;
       const translateX = vpt?.[4] ?? 0;
       const translateY = vpt?.[5] ?? 0;
 
       containerRef.current.style.setProperty('--grid-cell-size', `${minorSize}px`);
-      containerRef.current.style.setProperty('--grid-major-size', `${majorSize}px`);
-      containerRef.current.style.setProperty('--grid-minor-opacity-scale', `${minorVisibility}`);
-      containerRef.current.style.setProperty('--grid-major-opacity-scale', `${majorVisibility}`);
+      containerRef.current.style.setProperty('--grid-minor-opacity-scale', '1.8');
       containerRef.current.style.setProperty(
         '--grid-minor-offset-x',
-        `${positiveModulo(translateX, minorSize)}px`
+        `${translateX}px`
       );
       containerRef.current.style.setProperty(
         '--grid-minor-offset-y',
-        `${positiveModulo(translateY, minorSize)}px`
-      );
-      containerRef.current.style.setProperty(
-        '--grid-major-offset-x',
-        `${positiveModulo(translateX, majorSize)}px`
-      );
-      containerRef.current.style.setProperty(
-        '--grid-major-offset-y',
-        `${positiveModulo(translateY, majorSize)}px`
+        `${translateY}px`
       );
     };
 
@@ -365,6 +532,673 @@ export function Canvas() {
       canvas.off('after:render', syncGridToViewport);
     };
   }, [canvas]);
+
+  useEffect(() => {
+    hasSeenInitialRemoteCanvasRef.current = false;
+    setCanvasHydrated(false);
+    setShowHydrationOverlay(false);
+    pendingCanvasPersistRef.current = null;
+    lastCanvasHashRef.current = null;
+  }, [boardId, canvas]);
+
+  useEffect(() => {
+    if (canvasHydrated) {
+      setShowHydrationOverlay(false);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setShowHydrationOverlay(true);
+    }, HYDRATION_OVERLAY_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [canvasHydrated]);
+
+  useEffect(() => {
+    if (!canvas || !boardId) {
+      return;
+    }
+
+    const cachedCanvas = readCachedBoardCanvas(boardId);
+    if (!cachedCanvas) {
+      return;
+    }
+
+    isApplyingRemoteCanvasRef.current = true;
+    void canvas
+      .loadFromJSON(cachedCanvas as unknown as Record<string, unknown>)
+      .then(() => {
+        canvas.discardActiveObject();
+        canvas.requestRenderAll();
+      })
+      .catch((error) => {
+        console.warn('Failed to load cached board canvas:', error);
+      })
+      .finally(() => {
+        isApplyingRemoteCanvasRef.current = false;
+      });
+  }, [boardId, canvas]);
+
+  const flushCanvasPersist = React.useCallback(async () => {
+    if (!boardId || !syncUserId) {
+      return;
+    }
+    if (isPersistingCanvasRef.current || !pendingCanvasPersistRef.current) {
+      return;
+    }
+
+    const nextPersist = pendingCanvasPersistRef.current;
+    pendingCanvasPersistRef.current = null;
+    isPersistingCanvasRef.current = true;
+
+    try {
+      await saveBoardCanvasState(boardId, nextPersist.state, syncUserId);
+      writeCachedBoardCanvas(boardId, nextPersist.state);
+      lastCanvasHashRef.current = nextPersist.hash;
+    } catch (error) {
+      console.error('Error syncing canvas state:', error);
+    } finally {
+      isPersistingCanvasRef.current = false;
+      if (pendingCanvasPersistRef.current) {
+        void flushCanvasPersist();
+      }
+    }
+  }, [boardId, syncUserId]);
+
+  const scheduleCanvasPersist = React.useCallback(() => {
+    if (
+      !canvas ||
+      !boardId ||
+      !syncUserId ||
+      !canvasHydrated ||
+      !hasSeenInitialRemoteCanvasRef.current ||
+      isApplyingRemoteCanvasRef.current
+    ) {
+      return;
+    }
+
+    if (canvasSyncTimerRef.current !== null) {
+      window.clearTimeout(canvasSyncTimerRef.current);
+    }
+
+    canvasSyncTimerRef.current = window.setTimeout(() => {
+      canvasSyncTimerRef.current = null;
+      if (isApplyingRemoteCanvasRef.current) {
+        return;
+      }
+
+      canvas.getObjects().forEach((object) => {
+        ensureTrackedMetadata(object, actorId, { touchUpdated: false });
+      });
+
+      const serializedCanvas = serializeCanvas(canvas);
+      const normalizedCanvas = normalizeBoardCanvasState(serializedCanvas as BoardCanvas);
+      const nextHash = stringifyCanvasState(normalizedCanvas);
+      if (nextHash === lastCanvasHashRef.current) {
+        return;
+      }
+
+      writeCachedBoardCanvas(boardId, normalizedCanvas);
+
+      pendingCanvasPersistRef.current = {
+        state: normalizedCanvas,
+        hash: nextHash,
+      };
+      void flushCanvasPersist();
+    }, CANVAS_SYNC_DEBOUNCE_MS);
+  }, [actorId, boardId, canvas, canvasHydrated, flushCanvasPersist, syncUserId]);
+
+  useEffect(() => {
+    return () => {
+      if (canvasSyncTimerRef.current !== null) {
+        window.clearTimeout(canvasSyncTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!canvas || !boardId) {
+      return;
+    }
+
+    let isCancelled = false;
+    const hydrationTimeout = window.setTimeout(() => {
+      if (isCancelled || hasSeenInitialRemoteCanvasRef.current) {
+        return;
+      }
+      setCanvasHydrated(true);
+    }, 3000);
+
+    const markHydrated = () => {
+      if (isCancelled || hasSeenInitialRemoteCanvasRef.current) {
+        return;
+      }
+      hasSeenInitialRemoteCanvasRef.current = true;
+      setCanvasHydrated(true);
+      window.clearTimeout(hydrationTimeout);
+    };
+
+    const unsubscribe = subscribeToBoardCanvas(boardId, (remoteCanvasState) => {
+      if (isCancelled) {
+        return;
+      }
+
+      const normalizedState = normalizeBoardCanvasState(remoteCanvasState);
+      writeCachedBoardCanvas(boardId, normalizedState);
+      const remoteHash = stringifyCanvasState(normalizedState);
+
+      if (remoteHash === lastCanvasHashRef.current) {
+        markHydrated();
+        return;
+      }
+
+      const localHash = stringifyCanvasState(serializeCanvas(canvas));
+      if (remoteHash === localHash) {
+        lastCanvasHashRef.current = remoteHash;
+        markHydrated();
+        return;
+      }
+
+      const pendingLocalHash = pendingCanvasPersistRef.current?.hash ?? null;
+      if (pendingLocalHash && pendingLocalHash !== remoteHash) {
+        markHydrated();
+        return;
+      }
+
+      const remoteUpdatedAt =
+        typeof normalizedState.updatedAt === 'number' && Number.isFinite(normalizedState.updatedAt)
+          ? normalizedState.updatedAt
+          : 0;
+      const localMutationAt = lastLocalMutationAtRef.current;
+      if (localMutationAt > 0 && (remoteUpdatedAt === 0 || remoteUpdatedAt < localMutationAt)) {
+        markHydrated();
+        return;
+      }
+
+      isApplyingRemoteCanvasRef.current = true;
+      void canvas
+        .loadFromJSON(normalizedState as unknown as Record<string, unknown>)
+        .then(() => {
+          canvas.discardActiveObject();
+          canvas.requestRenderAll();
+          lastCanvasHashRef.current = remoteHash;
+        })
+        .catch((error) => {
+          console.error('Error loading remote canvas state:', error);
+        })
+        .finally(() => {
+          isApplyingRemoteCanvasRef.current = false;
+          markHydrated();
+        });
+    });
+
+    return () => {
+      isCancelled = true;
+      window.clearTimeout(hydrationTimeout);
+      unsubscribe();
+    };
+  }, [boardId, canvas]);
+
+  useEffect(() => {
+    if (!canvas || !boardId || !syncUserId) {
+      return;
+    }
+
+    const handleObjectAdded = (event: { target?: fabric.Object }) => {
+      if (isApplyingRemoteCanvasRef.current) {
+        return;
+      }
+      lastLocalMutationAtRef.current = Date.now();
+      ensureTrackedMetadata(event.target, actorId);
+      scheduleCanvasPersist();
+    };
+
+    const handleObjectModified = (event: { target?: fabric.Object }) => {
+      if (isApplyingRemoteCanvasRef.current) {
+        return;
+      }
+      lastLocalMutationAtRef.current = Date.now();
+      ensureTrackedMetadata(event.target, actorId);
+      scheduleCanvasPersist();
+    };
+
+    const handleObjectRemoved = () => {
+      if (isApplyingRemoteCanvasRef.current) {
+        return;
+      }
+      lastLocalMutationAtRef.current = Date.now();
+      scheduleCanvasPersist();
+    };
+
+    const handlePathCreated = (event: { path?: fabric.Object }) => {
+      if (isApplyingRemoteCanvasRef.current) {
+        return;
+      }
+      lastLocalMutationAtRef.current = Date.now();
+      ensureTrackedMetadata(event.path, actorId);
+      scheduleCanvasPersist();
+    };
+
+    const handleTextChanged = (event: { target?: fabric.Object }) => {
+      if (isApplyingRemoteCanvasRef.current) {
+        return;
+      }
+      lastLocalMutationAtRef.current = Date.now();
+      ensureTrackedMetadata(event.target, actorId);
+      scheduleCanvasPersist();
+    };
+
+    canvas.on('object:added', handleObjectAdded);
+    canvas.on('object:modified', handleObjectModified);
+    canvas.on('object:removed', handleObjectRemoved);
+    canvas.on('path:created', handlePathCreated);
+    canvas.on('text:changed', handleTextChanged);
+
+    return () => {
+      canvas.off('object:added', handleObjectAdded);
+      canvas.off('object:modified', handleObjectModified);
+      canvas.off('object:removed', handleObjectRemoved);
+      canvas.off('path:created', handlePathCreated);
+      canvas.off('text:changed', handleTextChanged);
+    };
+  }, [actorId, boardId, canvas, scheduleCanvasPersist, syncUserId]);
+
+  useEffect(() => {
+    if (!canvas || !boardId || !syncUserId || !canvasHydrated) {
+      return;
+    }
+
+    scheduleCanvasPersist();
+  }, [boardId, canvas, canvasHydrated, scheduleCanvasPersist, syncUserId]);
+
+  useEffect(() => {
+    if (!canvas || !boardId || !syncUserId) {
+      return;
+    }
+
+    const handleRenderSnapshot = () => {
+      scheduleCanvasPersist();
+    };
+
+    canvas.on('after:render', handleRenderSnapshot);
+
+    return () => {
+      canvas.off('after:render', handleRenderSnapshot);
+    };
+  }, [boardId, canvas, scheduleCanvasPersist, syncUserId]);
+
+  useEffect(() => {
+    if (!syncUserId) {
+      setPresenceIdentity({
+        displayName: user?.displayName || 'Anonymous',
+        emoji: user?.emoji || '👤',
+        color: user?.color || '#2563EB',
+      });
+      return;
+    }
+
+    let isCancelled = false;
+
+    const loadPresenceIdentity = async () => {
+      try {
+        const profile = await getUserProfile(syncUserId);
+        if (isCancelled) {
+          return;
+        }
+
+        setPresenceIdentity({
+          displayName: profile?.displayName || user?.displayName || 'Anonymous',
+          emoji: profile?.emoji || user?.emoji || '👤',
+          color: profile?.color || user?.color || '#2563EB',
+        });
+      } catch (error) {
+        if (isCancelled) {
+          return;
+        }
+        console.error('Error loading user profile for presence:', error);
+        setPresenceIdentity({
+          displayName: user?.displayName || 'Anonymous',
+          emoji: user?.emoji || '👤',
+          color: user?.color || '#2563EB',
+        });
+      }
+    };
+
+    void loadPresenceIdentity();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [syncUserId, user?.color, user?.displayName, user?.emoji]);
+
+  useEffect(() => {
+    if (!boardId) {
+      return;
+    }
+    return subscribeToPresence(boardId, setPresenceByUser);
+  }, [boardId]);
+
+  useEffect(() => {
+    if (!canvas || !boardId || !syncUserId) {
+      return;
+    }
+
+    let isDisposed = false;
+
+    const initialPresence: UserPresence = {
+      userId: syncUserId,
+      displayName: presenceIdentity.displayName,
+      color: presenceIdentity.color,
+      emoji: presenceIdentity.emoji,
+      cursor: { x: 0, y: 0 },
+      lastSeen: Date.now(),
+      isActive: true,
+      activity: {
+        tool: activeToolRef.current,
+        isDrawing: false,
+        trail: [],
+        updatedAt: Date.now(),
+      },
+    };
+
+    void updatePresence(boardId, syncUserId, initialPresence);
+    lastCursorSentAtRef.current = 0;
+    lastCursorSentRef.current = null;
+    queuedCursorRef.current = null;
+    lastDrawingSentAtRef.current = 0;
+    localDrawingTrailRef.current = [];
+    isLocalDrawingRef.current = false;
+
+    const flushCursor = () => {
+      if (isDisposed || !queuedCursorRef.current) {
+        return;
+      }
+
+      const nextCursor = queuedCursorRef.current;
+      queuedCursorRef.current = null;
+
+      const lastCursor = lastCursorSentRef.current;
+      if (lastCursor && lastCursor.x === nextCursor.x && lastCursor.y === nextCursor.y) {
+        return;
+      }
+
+      lastCursorSentAtRef.current = Date.now();
+      lastCursorSentRef.current = nextCursor;
+      void updatePresenceFields(boardId, syncUserId, {
+        cursor: nextCursor,
+        isActive: true,
+      });
+    };
+
+    const queueCursorSync = (cursor: { x: number; y: number }) => {
+      queuedCursorRef.current = cursor;
+      const elapsed = Date.now() - lastCursorSentAtRef.current;
+
+      if (elapsed >= CURSOR_SYNC_INTERVAL_MS) {
+        if (cursorFlushTimerRef.current !== null) {
+          window.clearTimeout(cursorFlushTimerRef.current);
+          cursorFlushTimerRef.current = null;
+        }
+        flushCursor();
+        return;
+      }
+
+      if (cursorFlushTimerRef.current !== null) {
+        return;
+      }
+
+      cursorFlushTimerRef.current = window.setTimeout(() => {
+        cursorFlushTimerRef.current = null;
+        flushCursor();
+      }, Math.max(12, CURSOR_SYNC_INTERVAL_MS - elapsed));
+    };
+
+    const flushDrawingTrail = () => {
+      if (isDisposed || !isLocalDrawingRef.current) {
+        return;
+      }
+
+      const trail = localDrawingTrailRef.current;
+      if (trail.length === 0) {
+        return;
+      }
+
+      lastDrawingSentAtRef.current = Date.now();
+      void updatePresenceFields(boardId, syncUserId, {
+        activity: {
+          tool: 'pen',
+          isDrawing: true,
+          trail,
+          updatedAt: Date.now(),
+        },
+      });
+    };
+
+    const queueDrawingTrailSync = () => {
+      const elapsed = Date.now() - lastDrawingSentAtRef.current;
+      if (elapsed >= DRAW_TRAIL_SYNC_INTERVAL_MS) {
+        if (drawingFlushTimerRef.current !== null) {
+          window.clearTimeout(drawingFlushTimerRef.current);
+          drawingFlushTimerRef.current = null;
+        }
+        flushDrawingTrail();
+        return;
+      }
+
+      if (drawingFlushTimerRef.current !== null) {
+        return;
+      }
+
+      drawingFlushTimerRef.current = window.setTimeout(() => {
+        drawingFlushTimerRef.current = null;
+        flushDrawingTrail();
+      }, Math.max(12, DRAW_TRAIL_SYNC_INTERVAL_MS - elapsed));
+    };
+
+    const handlePointerActivity = (event: fabric.TPointerEventInfo<fabric.TPointerEvent>) => {
+      const pointer = canvas.getScenePoint(event.e);
+      const cursorPoint = {
+        x: roundCoordinate(pointer.x),
+        y: roundCoordinate(pointer.y),
+      };
+      queueCursorSync({
+        x: cursorPoint.x,
+        y: cursorPoint.y,
+      });
+
+      if (activeToolRef.current !== 'pen' || !isLocalDrawingRef.current) {
+        return;
+      }
+
+      const trail = localDrawingTrailRef.current;
+      const previousPoint = trail[trail.length - 1];
+      if (previousPoint) {
+        const deltaX = cursorPoint.x - previousPoint.x;
+        const deltaY = cursorPoint.y - previousPoint.y;
+        if (Math.hypot(deltaX, deltaY) < DRAW_TRAIL_MIN_DISTANCE) {
+          return;
+        }
+      }
+
+      trail.push(cursorPoint);
+      if (trail.length > DRAW_TRAIL_MAX_POINTS) {
+        trail.splice(0, trail.length - DRAW_TRAIL_MAX_POINTS);
+      }
+      queueDrawingTrailSync();
+    };
+
+    const handlePenDrawStart = (event: fabric.TPointerEventInfo<fabric.TPointerEvent>) => {
+      if (activeToolRef.current !== 'pen') {
+        return;
+      }
+
+      const pointer = canvas.getScenePoint(event.e);
+      const initialPoint = {
+        x: roundCoordinate(pointer.x),
+        y: roundCoordinate(pointer.y),
+      };
+
+      isLocalDrawingRef.current = true;
+      localDrawingTrailRef.current = [initialPoint];
+      lastDrawingSentAtRef.current = 0;
+      flushDrawingTrail();
+    };
+
+    const handlePenDrawEnd = () => {
+      if (!isLocalDrawingRef.current) {
+        return;
+      }
+
+      isLocalDrawingRef.current = false;
+      localDrawingTrailRef.current = [];
+
+      if (drawingFlushTimerRef.current !== null) {
+        window.clearTimeout(drawingFlushTimerRef.current);
+        drawingFlushTimerRef.current = null;
+      }
+
+      void updatePresenceFields(boardId, syncUserId, {
+        activity: {
+          tool: activeToolRef.current,
+          isDrawing: false,
+          trail: [],
+          updatedAt: Date.now(),
+        },
+      });
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void updatePresence(boardId, syncUserId, {
+          userId: syncUserId,
+          displayName: presenceIdentity.displayName,
+          color: presenceIdentity.color,
+          emoji: presenceIdentity.emoji,
+          cursor: lastCursorSentRef.current ?? { x: 0, y: 0 },
+          lastSeen: Date.now(),
+          isActive: true,
+          activity: {
+            tool: activeToolRef.current,
+            isDrawing: false,
+            trail: [],
+            updatedAt: Date.now(),
+          },
+        });
+        return;
+      }
+
+      void updatePresenceFields(boardId, syncUserId, {
+        isActive: false,
+        activity: {
+          tool: activeToolRef.current,
+          isDrawing: false,
+          trail: [],
+          updatedAt: Date.now(),
+        },
+      });
+    };
+
+    canvas.on('mouse:move', handlePointerActivity);
+    canvas.on('mouse:down', handlePointerActivity);
+    canvas.on('mouse:up', handlePointerActivity);
+    canvas.on('mouse:down', handlePenDrawStart);
+    canvas.on('mouse:up', handlePenDrawEnd);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      isDisposed = true;
+      canvas.off('mouse:move', handlePointerActivity);
+      canvas.off('mouse:down', handlePointerActivity);
+      canvas.off('mouse:up', handlePointerActivity);
+      canvas.off('mouse:down', handlePenDrawStart);
+      canvas.off('mouse:up', handlePenDrawEnd);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+
+      if (cursorFlushTimerRef.current !== null) {
+        window.clearTimeout(cursorFlushTimerRef.current);
+        cursorFlushTimerRef.current = null;
+      }
+      if (drawingFlushTimerRef.current !== null) {
+        window.clearTimeout(drawingFlushTimerRef.current);
+        drawingFlushTimerRef.current = null;
+      }
+
+      void removePresence(boardId, syncUserId);
+    };
+  }, [
+    boardId,
+    canvas,
+    presenceIdentity.color,
+    presenceIdentity.displayName,
+    presenceIdentity.emoji,
+    syncUserId,
+  ]);
+
+  useEffect(() => {
+    if (!canvas) {
+      return;
+    }
+
+    const syncViewportTick = () => {
+      const now = Date.now();
+      if (now - viewportTickThrottleRef.current < 80) {
+        return;
+      }
+      viewportTickThrottleRef.current = now;
+      setViewportTick((value) => value + 1);
+    };
+
+    canvas.on('after:render', syncViewportTick);
+    return () => {
+      canvas.off('after:render', syncViewportTick);
+    };
+  }, [canvas]);
+
+  void viewportTick;
+  const remoteCursors = !canvas
+    ? []
+    : Object.values(presenceByUser)
+      .filter((presence) => {
+        if (!presence.isActive || presence.userId === syncUserId) {
+          return false;
+        }
+        return Date.now() - presence.lastSeen <= REMOTE_CURSOR_TTL_MS;
+      })
+      .map((presence) => {
+        const viewportPoint = toViewportCoordinates(canvas, presence.cursor);
+        return {
+          ...presence,
+          viewportX: viewportPoint.x,
+          viewportY: viewportPoint.y,
+        };
+      });
+
+  const remoteDrawingTrails = !canvas
+    ? []
+    : Object.values(presenceByUser)
+      .filter((presence) => {
+        if (!presence.isActive || presence.userId === syncUserId) {
+          return false;
+        }
+        if (Date.now() - presence.lastSeen > REMOTE_CURSOR_TTL_MS) {
+          return false;
+        }
+        return Boolean(presence.activity?.isDrawing) &&
+          Array.isArray(presence.activity?.trail) &&
+          (presence.activity?.trail?.length ?? 0) > 1;
+      })
+      .map((presence) => {
+        const points = (presence.activity?.trail ?? []).map((point) =>
+          toViewportCoordinates(canvas, point)
+        );
+        return {
+          userId: presence.userId,
+          color: presence.color,
+          points: points.map((point) => `${roundCoordinate(point.x)},${roundCoordinate(point.y)}`).join(' '),
+        };
+      });
 
   const deleteActiveSelection = React.useCallback(() => {
     if (!canvas) return;
@@ -607,6 +1441,7 @@ export function Canvas() {
           ? new PressureBrush(canvas)
           : new fabric.PencilBrush(canvas);
         brush.color = strokeColor;
+        brush.decimate = 0;
         if (brush instanceof PressureBrush) {
           brush.widthValue = strokeWidth;
         } else {
@@ -1445,6 +2280,14 @@ export function Canvas() {
         onChange={handleImageFileInputChange}
       />
 
+      {!canvasHydrated && showHydrationOverlay && (
+        <div className={styles.hydrationOverlay}>
+          <div className={styles.hydrationBadge} role="status" aria-live="polite">
+            Syncing board...
+          </div>
+        </div>
+      )}
+
       {activeTool === 'sticky' && (
         <div className={styles.modeHint} role="status" aria-live="polite">
           Pick a color, then click anywhere to place a sticky note.
@@ -1472,6 +2315,42 @@ export function Canvas() {
           </div>
         </div>
       )}
+
+      {remoteDrawingTrails.length > 0 && (
+        <svg className={styles.remoteTrailLayer} aria-hidden="true">
+          {remoteDrawingTrails.map((trail) => (
+            <polyline
+              key={trail.userId}
+              points={trail.points}
+              fill="none"
+              stroke={trail.color}
+              strokeWidth={3}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              opacity={0.92}
+            />
+          ))}
+        </svg>
+      )}
+
+      {remoteCursors.map((presence) => (
+        <div
+          key={presence.userId}
+          className={styles.remoteCursor}
+          style={{
+            left: `${presence.viewportX}px`,
+            top: `${presence.viewportY}px`,
+            '--remote-cursor-color': presence.color,
+          } as React.CSSProperties}
+          aria-label={`${presence.displayName} cursor`}
+        >
+          <span className={styles.remoteCursorPointer} aria-hidden="true" />
+          <span className={styles.remoteCursorBadge}>
+            <span>{presence.emoji}</span>
+            <span>{presence.displayName}</span>
+          </span>
+        </div>
+      ))}
 
       {imagePasteNotice && (
         <div

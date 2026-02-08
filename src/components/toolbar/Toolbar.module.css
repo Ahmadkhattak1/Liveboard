@@ -1,17 +1,22 @@
-/* Miro-style left sidebar toolbar */
+/* Floating left toolbar island */
 .toolbar {
   position: fixed;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 60px;
-  background: var(--bg);
-  border-right: 1px solid var(--border-light);
+  left: max(16px, env(safe-area-inset-left));
+  top: 50%;
+  transform: translateY(-50%);
+  width: 70px;
+  max-height: calc(100vh - 48px);
+  background: #f8f8f9;
+  border: 1px solid #d5d8dd;
+  border-radius: 16px;
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.1), 0 2px 8px rgba(15, 23, 42, 0.06);
   display: flex;
   flex-direction: column;
-  padding: 80px 8px 16px 8px;
+  align-items: center;
+  padding: 14px 10px;
   gap: 8px;
   z-index: 100;
+  overflow: visible;
 }
 
 /* Tool buttons */
@@ -19,25 +24,27 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  background: transparent;
+  width: 48px;
+  height: 48px;
+  border: 1px solid #d3d7de;
+  border-radius: 14px;
+  background: #ffffff;
   color: var(--text);
   cursor: pointer;
-  transition: all var(--transition);
+  transition: none;
   position: relative;
 }
 
 .toolButton:hover {
-  background: var(--bg-secondary);
+  background: #f2f6fb;
+  border-color: #c0c9d5;
 }
 
 .toolButton.active {
-  background: var(--bg-secondary);
-  border-color: var(--text);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  background: #0b7db8;
+  border-color: #0b7db8;
+  color: #ffffff;
+  box-shadow: 0 8px 16px rgba(11, 125, 184, 0.28);
 }
 
 .toolButton.active .emoji {
@@ -83,7 +90,7 @@
   font-size: 10px;
   line-height: 1;
   color: var(--text-secondary);
-  transition: transform var(--transition), color var(--transition);
+  transition: none;
 }
 
 .open {
@@ -91,23 +98,23 @@
 }
 
 .toolButton.active .dropdownArrow {
-  color: var(--text-secondary);
+  color: rgba(255, 255, 255, 0.95);
 }
 
 .toolMenu {
   position: absolute;
   top: 0;
-  left: calc(100% + 10px);
+  left: calc(100% + 12px);
   min-width: 196px;
   padding: 8px;
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border-light);
-  background: var(--bg);
-  box-shadow: var(--shadow-md);
+  border-radius: 18px;
+  border: 1px solid #d7dbe3;
+  background: #fbfcfe;
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.06);
   display: flex;
   flex-direction: column;
   gap: 4px;
-  z-index: 110;
+  z-index: 260;
 }
 
 .toolMenuItem {
@@ -117,37 +124,37 @@
   gap: 10px;
   padding: 8px 10px;
   border: 1px solid transparent;
-  border-radius: var(--radius-md);
+  border-radius: 12px;
   background: transparent;
   color: var(--text);
   cursor: pointer;
-  transition: all var(--transition);
+  transition: none;
   text-align: left;
 }
 
 .toolMenuItem:hover {
-  background: var(--bg-secondary);
-  border-color: var(--border-light);
+  background: #f1f6fb;
+  border-color: #d3dbe6;
 }
 
 .toolMenuItemActive {
-  background: var(--text);
-  border-color: var(--text);
-  color: var(--bg);
+  background: #0b7db8;
+  border-color: #0b7db8;
+  color: #ffffff;
 }
 
 .toolMenuItemActive:hover {
-  background: var(--text);
-  border-color: var(--text);
-  color: var(--bg);
+  background: #0b7db8;
+  border-color: #0b7db8;
+  color: #ffffff;
 }
 
 .toolMenuItemActive .toolMenuIcon {
-  color: var(--bg);
+  color: #ffffff;
 }
 
 .toolMenuItemActive .toolMenuLabel {
-  color: var(--bg);
+  color: #ffffff;
 }
 
 .toolMenuIcon {
@@ -178,21 +185,21 @@
 }
 
 .toolMenuItemActive .toolMenuMeta {
-  color: var(--bg);
+  color: #ffffff;
   opacity: 0.85;
 }
 
 .shapePanel {
   position: absolute;
   top: 0;
-  left: calc(100% + 10px);
+  left: calc(100% + 12px);
   width: 300px;
   padding: 14px;
   border-radius: 18px;
-  border: 1px solid var(--border-light);
-  background: var(--bg);
-  box-shadow: var(--shadow-md);
-  z-index: 115;
+  border: 1px solid #d7dbe3;
+  background: #fbfcfe;
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.06);
+  z-index: 265;
 }
 
 .shapeConnectorRow {
@@ -211,27 +218,27 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all var(--transition);
+  transition: none;
 }
 
 .shapeIconButton:hover {
-  background: var(--bg-secondary);
-  border-color: var(--border-light);
+  background: #f1f6fb;
+  border-color: #d3dbe6;
 }
 
 .shapeIconButtonActive {
-  background: var(--text);
-  border-color: var(--text);
-  color: var(--bg);
+  background: #0b7db8;
+  border-color: #0b7db8;
+  color: #ffffff;
 }
 
 .shapeIconButtonActive .vectorIcon {
-  color: var(--bg);
+  color: #ffffff;
 }
 
 .shapePanelDivider {
   height: 1px;
-  background: var(--border-light);
+  background: #e2e6ee;
   margin: 12px 0;
 }
 
@@ -251,22 +258,22 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all var(--transition);
+  transition: none;
 }
 
 .shapeTile:hover {
-  background: var(--bg-secondary);
-  border-color: var(--border-light);
+  background: #f1f6fb;
+  border-color: #d3dbe6;
 }
 
 .shapeTileActive {
-  background: var(--text);
-  border-color: var(--text);
-  color: var(--bg);
+  background: #0b7db8;
+  border-color: #0b7db8;
+  color: #ffffff;
 }
 
 .shapeTileActive .vectorIcon {
-  color: var(--bg);
+  color: #ffffff;
 }
 
 .shapeTile .vectorIcon,
@@ -279,21 +286,22 @@
   margin-top: 10px;
   width: 100%;
   height: 34px;
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-md);
-  background: var(--bg);
-  color: var(--text);
+  border: 1px solid #ced5df;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #394150;
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.4px;
   text-transform: uppercase;
   cursor: pointer;
-  transition: all var(--transition);
+  transition: none;
 }
 
 .moreShapesButton:hover {
-  border-color: var(--text);
-  background: var(--bg-secondary);
+  border-color: #0b7db8;
+  background: #eef6fd;
+  color: #0b7db8;
 }
 
 /* Tooltip on hover */
@@ -301,16 +309,19 @@
   content: attr(data-tooltip);
   position: absolute;
   left: 100%;
-  margin-left: 12px;
-  padding: 6px 12px;
-  background: var(--text);
-  color: var(--bg);
-  border-radius: var(--radius-md);
-  font-size: 13px;
+  margin-left: 14px;
+  padding: 8px 14px;
+  background: #ffffff;
+  color: #0f172a;
+  border: 1px solid #d4d9e0;
+  border-radius: 999px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+  font-size: 14px;
+  font-weight: 600;
   white-space: nowrap;
   opacity: 0;
   pointer-events: none;
-  transition: opacity var(--transition);
+  transition: none;
 }
 
 .toolButton:hover::after {
@@ -327,10 +338,19 @@
 
 /* Divider */
 .divider {
-  width: 100%;
+  width: 78%;
   height: 1px;
-  background: var(--border-light);
+  background: #dde3ea;
+  opacity: 1;
   margin: 8px 0;
+}
+
+.colorTray {
+  position: relative;
+  width: 44px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .sidebarColors {
@@ -343,51 +363,78 @@
 .sidebarColorButton {
   width: 19px;
   height: 19px;
-  border: 1px solid var(--border);
+  border: 1.5px solid #cdd4de;
   border-radius: 6px;
   cursor: pointer;
-  transition: transform var(--transition), box-shadow var(--transition);
-}
-
-.sidebarColorButton:hover {
-  transform: scale(1.06);
+  transition: none;
 }
 
 .sidebarColorActive {
-  box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--text);
+  box-shadow: 0 0 0 2px #f8f8f9, 0 0 0 3px #0b7db8;
 }
 
 .sidebarColorToggle {
   grid-column: 1 / -1;
-  height: 20px;
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-sm);
-  background: var(--bg-secondary);
+  height: 24px;
+  border: 1px solid #ced5df;
+  border-radius: 999px;
+  background: #ffffff;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 600;
   line-height: 1;
-  transition: all var(--transition);
+  transition: none;
 }
 
 .sidebarColorToggle:hover {
-  color: var(--text);
-  border-color: var(--border);
+  color: #0b7db8;
+  border-color: #0b7db8;
+  background: #eef6fd;
+}
+
+.colorPopover {
+  position: absolute;
+  left: calc(100% + 12px);
+  bottom: 0;
+  width: 116px;
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid #d7dbe3;
+  background: #fbfcfe;
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.06);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  z-index: 266;
+}
+
+.colorPopoverButton {
+  width: 100%;
+  aspect-ratio: 1;
+  border: 1.5px solid #cdd4de;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: none;
+}
+
+.colorPopoverButtonActive {
+  box-shadow: 0 0 0 2px #fbfcfe, 0 0 0 3px #0b7db8;
 }
 
 /* Properties panel (floating) */
 .propertiesPanel {
   position: fixed;
   bottom: 24px;
-  left: 80px;
-  background: var(--bg);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-lg);
+  left: 104px;
+  background: #fbfcfe;
+  border: 1px solid #d7dbe3;
+  border-radius: 16px;
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  box-shadow: var(--shadow-md);
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.06);
   z-index: 90;
   min-width: 220px;
 }
@@ -486,11 +533,11 @@
   bottom: max(16px, env(safe-area-inset-bottom));
   display: flex;
   gap: 6px;
-  background: var(--bg);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-lg);
+  background: #fbfcfe;
+  border: 1px solid #d7dbe3;
+  border-radius: 16px;
   padding: 6px;
-  box-shadow: var(--shadow-md);
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.06);
   z-index: 220;
   isolation: isolate;
   pointer-events: auto;
@@ -539,7 +586,8 @@
 
 .zoomDivider {
   width: 1px;
-  background: var(--border-light);
+  background: #dbe1e9;
+  opacity: 1;
   margin: 2px 1px;
 }
 
@@ -557,8 +605,12 @@
 /* Mobile hide */
 @media (max-width: 768px) {
   .toolbar {
-    width: 52px;
-    padding: 70px 4px 12px 4px;
+    left: max(8px, env(safe-area-inset-left));
+    width: 60px;
+    max-height: calc(100vh - 24px);
+    padding: 10px 6px;
+    border-radius: 14px;
+    box-shadow: 0 14px 26px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.07);
   }
 
   .toolButton {
@@ -576,7 +628,7 @@
   }
 
   .propertiesPanel {
-    left: 60px;
+    left: 84px;
     min-width: 200px;
   }
 
@@ -608,5 +660,17 @@
   .sidebarColorButton {
     width: 17px;
     height: 17px;
+  }
+
+  .colorTray {
+    width: 40px;
+    gap: 5px;
+  }
+
+  .colorPopover {
+    left: calc(100% + 8px);
+    width: 104px;
+    gap: 5px;
+    padding: 7px;
   }
 }

@@ -5,7 +5,7 @@ import * as fabric from 'fabric';
 import { ToolType } from '@/types/canvas';
 import { DEFAULT_STROKE_COLOR, DEFAULT_FILL_COLOR } from '@/lib/constants/colors';
 import { DEFAULT_STROKE_WIDTH } from '@/lib/constants/tools';
-import { CONNECTOR_HISTORY_PROPS } from '@/lib/canvas/connectors';
+import { serializeCanvas, stringifyCanvasState } from '@/lib/canvas/serialization';
 
 interface CanvasContextType {
   canvas: fabric.Canvas | null;
@@ -32,23 +32,9 @@ const CanvasContext = createContext<CanvasContextType | undefined>(undefined);
 
 const HISTORY_DEBOUNCE_MS = 140;
 const HISTORY_LIMIT = 120;
-const CANVAS_HISTORY_PROPS = [
-  'id',
-  'createdBy',
-  'createdAt',
-  'updatedAt',
-  'updatedBy',
-  'stickyNoteId',
-  'stickyRole',
-  'stickyHasPlaceholder',
-  ...CONNECTOR_HISTORY_PROPS,
-];
 
 function serializeCanvasState(canvas: fabric.Canvas): string {
-  const serializer = canvas as fabric.Canvas & {
-    toJSON: (propertiesToInclude?: string[]) => unknown;
-  };
-  return JSON.stringify(serializer.toJSON(CANVAS_HISTORY_PROPS));
+  return stringifyCanvasState(serializeCanvas(canvas));
 }
 
 export function CanvasProvider({ children }: { children: React.ReactNode }) {

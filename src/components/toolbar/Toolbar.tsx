@@ -3,12 +3,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CursorPointer,
-  DesignNib,
   DesignPencil,
   DragHandGesture,
-  FrameTool,
   MediaImage,
-  OpenSelectHandGesture,
   Post,
   Text,
 } from 'iconoir-react';
@@ -33,6 +30,7 @@ interface ToolbarButtonTool {
   id: ToolType;
   name: string;
   shortcut: string;
+  emoji: string;
   icon: React.ReactNode;
 }
 
@@ -45,7 +43,7 @@ interface PenModeOption {
 const SHAPE_GRID_COLUMNS = 4;
 const SHAPE_VISIBLE_ROWS = 2;
 const SHAPES_VISIBLE_COUNT = SHAPE_GRID_COLUMNS * SHAPE_VISIBLE_ROWS;
-const ICON_STROKE_WIDTH = 1.9;
+const ICON_STROKE_WIDTH = 2.05;
 
 function ToolIcon({ icon: Icon }: { icon: React.ComponentType<any> }) {
   return (
@@ -238,20 +236,44 @@ function CursorIcon() {
   return <ToolIcon icon={CursorPointer} />;
 }
 
-function HandOpenIcon() {
-  return <ToolIcon icon={OpenSelectHandGesture} />;
-}
-
 function HandGrabIcon() {
   return <ToolIcon icon={DragHandGesture} />;
 }
 
 function GeometricShapesIcon() {
-  return <ToolIcon icon={FrameTool} />;
+  return (
+    <svg viewBox="0 0 24 24" className={`${styles.vectorIcon} ${styles.houseIcon}`} aria-hidden="true">
+      <rect x="3.8" y="4.2" width="6.4" height="6.4" rx="1.4" fill="none" stroke="currentColor" strokeWidth="1.9" />
+      <circle cx="16.9" cy="7.4" r="3.1" fill="none" stroke="currentColor" strokeWidth="1.9" />
+      <path d="M4.4 18.8H10.1L7.2 13.9L4.4 18.8Z" fill="none" stroke="currentColor" strokeWidth="1.9" />
+      <path d="M13.2 19.1L20 12.4" fill="none" stroke="currentColor" strokeWidth="1.9" />
+      <path d="M15.9 12.4H20V16.5" fill="none" stroke="currentColor" strokeWidth="1.9" />
+    </svg>
+  );
 }
 
 function InkPenIcon() {
-  return <ToolIcon icon={DesignNib} />;
+  return (
+    <svg viewBox="0 0 24 24" className={styles.vectorIcon} aria-hidden="true">
+      <path
+        d="M5.8 18.6L13.6 10.8L16.8 14L9 21.8H5.8V18.6Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M12.9 11.5L15.9 8.5C16.7 7.7 17.9 7.7 18.7 8.5C19.5 9.3 19.5 10.5 18.7 11.3L15.7 14.3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M4 22H10.6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
 }
 
 function BrushIcon() {
@@ -348,6 +370,7 @@ export function Toolbar() {
   const [showAllSidebarColors, setShowAllSidebarColors] = useState(false);
   const shapesDropdownRef = useRef<HTMLDivElement>(null);
   const penDropdownRef = useRef<HTMLDivElement>(null);
+  const colorTrayRef = useRef<HTMLDivElement>(null);
 
   const connectorShapeTools = useMemo<ShapeToolOption[]>(
     () => [
@@ -406,8 +429,8 @@ export function Toolbar() {
   );
 
   const utilityTools: ToolbarButtonTool[] = [
-    { id: 'text', name: 'Text', shortcut: 'T', icon: <TextToolIcon /> },
-    { id: 'image', name: 'Image', shortcut: 'I', icon: <ImageToolIcon /> },
+    { id: 'text', name: 'Text', shortcut: 'T', emoji: '📝', icon: <TextToolIcon /> },
+    { id: 'image', name: 'Image', shortcut: 'I', emoji: '🖼️', icon: <ImageToolIcon /> },
   ];
 
   const isShapeToolActive = isShapeToolType(activeTool);
@@ -418,12 +441,11 @@ export function Toolbar() {
     ? penModes.find((mode) => mode.id === 'ink')!
     : penModes.find((mode) => mode.id === 'brush')!;
 
-  const visibleSidebarColors = showAllSidebarColors
-    ? DRAWING_COLORS
-    : DRAWING_COLORS.slice(0, 4);
+  const visibleSidebarColors = DRAWING_COLORS.slice(0, 4);
+  const overflowSidebarColors = DRAWING_COLORS.slice(4);
 
   useEffect(() => {
-    if (!showShapesDropdown && !showPenDropdown) return;
+    if (!showShapesDropdown && !showPenDropdown && !showAllSidebarColors) return;
 
     const handleClickOutside = (event: MouseEvent) => {
       if (!(event.target instanceof Node)) return;
@@ -443,13 +465,21 @@ export function Toolbar() {
       ) {
         setShowPenDropdown(false);
       }
+
+      if (
+        showAllSidebarColors &&
+        colorTrayRef.current &&
+        !colorTrayRef.current.contains(event.target)
+      ) {
+        setShowAllSidebarColors(false);
+      }
     };
 
     window.addEventListener('mousedown', handleClickOutside);
     return () => {
       window.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [showShapesDropdown, showPenDropdown]);
+  }, [showShapesDropdown, showPenDropdown, showAllSidebarColors]);
 
   useEffect(() => {
     if (!showShapesDropdown) {
@@ -518,7 +548,7 @@ export function Toolbar() {
         <button
           onClick={() => handleToolSelect('select')}
           className={`${styles.toolButton} ${activeTool === 'select' ? styles.active : ''}`}
-          data-tooltip="Select (V)"
+          data-tooltip="🖱️ Select (V)"
         >
           <CursorIcon />
         </button>
@@ -526,9 +556,9 @@ export function Toolbar() {
         <button
           onClick={() => handleToolSelect('hand')}
           className={`${styles.toolButton} ${activeTool === 'hand' ? styles.active : ''}`}
-          data-tooltip="Hand Tool (H)"
+          data-tooltip="✋ Hand Tool (H)"
         >
-          {activeTool === 'hand' ? <HandGrabIcon /> : <HandOpenIcon />}
+          <HandGrabIcon />
         </button>
 
         <div className={styles.toolDropdown} ref={penDropdownRef}>
@@ -546,7 +576,7 @@ export function Toolbar() {
             className={`${styles.toolButton} ${styles.modeTrigger} ${
               activeTool === 'pen' ? styles.active : ''
             }`}
-            data-tooltip={`${currentPenMode.name} (P)`}
+            data-tooltip={`✍️ ${currentPenMode.name} (P)`}
             aria-label="Pen mode"
             aria-haspopup="menu"
             aria-expanded={showPenDropdown}
@@ -579,7 +609,7 @@ export function Toolbar() {
         <button
           onClick={() => handleToolSelect(activeTool === 'sticky' ? 'select' : 'sticky')}
           className={`${styles.toolButton} ${activeTool === 'sticky' ? styles.active : ''}`}
-          data-tooltip="Sticky Note (N)"
+          data-tooltip="🗒️ Sticky Note (N)"
         >
           <StickyNoteIcon />
         </button>
@@ -595,7 +625,7 @@ export function Toolbar() {
             className={`${styles.toolButton} ${styles.shapeTrigger} ${
               isShapeToolActive ? styles.active : ''
             }`}
-            data-tooltip={isShapeToolActive ? `Shapes: ${activeShape.name}` : 'Shapes'}
+            data-tooltip={isShapeToolActive ? `🔷 Shapes: ${activeShape.name}` : '🔷 Shapes'}
             aria-label="Shape tools"
             aria-haspopup="menu"
             aria-expanded={showShapesDropdown}
@@ -683,7 +713,7 @@ export function Toolbar() {
             key={tool.id}
             onClick={() => handleToolSelect(tool.id)}
             className={`${styles.toolButton} ${activeTool === tool.id ? styles.active : ''}`}
-            data-tooltip={`${tool.name} (${tool.shortcut})`}
+            data-tooltip={`${tool.emoji} ${tool.name} (${tool.shortcut})`}
           >
             {tool.icon}
           </button>
@@ -692,25 +722,46 @@ export function Toolbar() {
         <div className={styles.divider} />
 
         {activeTool !== 'sticky' && (
-          <div className={styles.sidebarColors} aria-label="Color palette">
-            {visibleSidebarColors.map((color) => (
+          <div className={styles.colorTray} ref={colorTrayRef}>
+            <div className={styles.sidebarColors} aria-label="Color palette">
+              {visibleSidebarColors.map((color) => (
+                <button
+                  key={color}
+                  onClick={() => setStrokeColor(color)}
+                  className={`${styles.sidebarColorButton} ${
+                    strokeColor === color ? styles.sidebarColorActive : ''
+                  }`}
+                  style={{ backgroundColor: color }}
+                  title={color}
+                />
+              ))}
+            </div>
+
+            {overflowSidebarColors.length > 0 && (
               <button
-                key={color}
-                onClick={() => setStrokeColor(color)}
-                className={`${styles.sidebarColorButton} ${
-                  strokeColor === color ? styles.sidebarColorActive : ''
-                }`}
-                style={{ backgroundColor: color }}
-                title={color}
-              />
-            ))}
-            <button
-              onClick={() => setShowAllSidebarColors((prev) => !prev)}
-              className={styles.sidebarColorToggle}
-              title={showAllSidebarColors ? 'Show fewer colors' : 'Show all colors'}
-            >
-              {showAllSidebarColors ? '−' : '+'}
-            </button>
+                onClick={() => setShowAllSidebarColors((prev) => !prev)}
+                className={styles.sidebarColorToggle}
+                title={showAllSidebarColors ? 'Show fewer colors' : 'Show all colors'}
+              >
+                {showAllSidebarColors ? '−' : '+'}
+              </button>
+            )}
+
+            {showAllSidebarColors && overflowSidebarColors.length > 0 && (
+              <div className={styles.colorPopover} aria-label="Extended color palette">
+                {overflowSidebarColors.map((color) => (
+                  <button
+                    key={color}
+                    onClick={() => setStrokeColor(color)}
+                    className={`${styles.colorPopoverButton} ${
+                      strokeColor === color ? styles.colorPopoverButtonActive : ''
+                    }`}
+                    style={{ backgroundColor: color }}
+                    title={color}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>

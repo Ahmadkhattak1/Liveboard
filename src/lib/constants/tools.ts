@@ -66,8 +66,42 @@ export const USER_EMOJIS = [
   '⚽', '🎲', '🎪', '🎨', '🌮',
 ];
 
+export const BOARD_EMOJIS = [
+  '😀', '😎', '🤓', '🥳', '🤠', '🫡', '🧠', '🧩',
+  '🚀', '⚡', '🔥', '💡', '✨', '⭐', '🌈', '☁️',
+  '🌍', '🌊', '🌱', '🌴', '🍀', '🌸', '🌻', '🍎',
+  '🍕', '🍔', '🍣', '🍩', '☕', '🧋', '🍿', '🍪',
+  '🎨', '🖌️', '🖍️', '📐', '📏', '🧪', '🔬', '🔭',
+  '💻', '🖥️', '⌨️', '📱', '🛰️', '🤖', '🛠️', '🧰',
+  '📚', '📓', '📘', '📙', '📝', '📌', '📎', '🗂️',
+  '🏠', '🏢', '🏫', '🏟️', '🗺️', '🧭', '✈️', '🚆',
+  '🚴', '🎯', '🎮', '🎲', '🎵', '🎸', '🎺', '🎬',
+  '🏀', '⚽', '🏈', '🎾', '🏓', '🥊', '🎳', '🏆',
+  '🦊', '🐼', '🐨', '🐸', '🐙', '🐳', '🦄', '🐝',
+  '💼', '🧾', '📊', '📈', '🧮', '🔒', '🔑', '🪙',
+];
+
+export const PRIORITY_BOARD_EMOJIS = [
+  '🔥', '⚡', '✨', '⭐',
+  '🌿', '🌱', '🌸', '🌊',
+  '🍃', '🌴', '🌵', '🌻',
+  '🍂', '🪴', '🪵', '🪨',
+  '🧭', '🗺️', '🛰️', '🛠️',
+  '🧰', '🧪', '🔭', '🧩',
+  '📌', '📎', '🗂️', '🪙',
+];
+
 export function getRandomEmoji(): string {
   return USER_EMOJIS[Math.floor(Math.random() * USER_EMOJIS.length)];
+}
+
+export function getRandomBoardEmoji(): string {
+  const source =
+    Math.random() < 0.75 && PRIORITY_BOARD_EMOJIS.length > 0
+      ? PRIORITY_BOARD_EMOJIS
+      : BOARD_EMOJIS;
+
+  return source[Math.floor(Math.random() * source.length)] || '🧩';
 }
 
 export const DEFAULT_STROKE_WIDTH = 2;

@@ -3,6 +3,8 @@ import {
   createUserWithEmailAndPassword,
   signOut as firebaseSignOut,
   signInAnonymously,
+  signInWithPopup,
+  GoogleAuthProvider,
   updateProfile,
   User as FirebaseUser,
   onAuthStateChanged,
@@ -12,8 +14,36 @@ import { auth } from './config';
 import { User, LoginCredentials, SignupCredentials } from '@/types/user';
 import { getRandomEmoji } from '@/lib/constants/tools';
 import { getRandomColor } from '@/lib/constants/colors';
-import { ref, set } from 'firebase/database';
+import { get, ref, set } from 'firebase/database';
 import { database } from './config';
+
+interface UserProfileData {
+  email: string | null;
+  displayName: string;
+  emoji: string;
+  color: string;
+  isAnonymous: boolean;
+}
+
+async function ensureUserProfile(userId: string, data: UserProfileData): Promise<void> {
+  const userRef = ref(database, `users/${userId}`);
+  const userSnapshot = await get(userRef);
+
+  if (userSnapshot.exists()) {
+    return;
+  }
+
+  await set(userRef, {
+    id: userId,
+    email: data.email,
+    displayName: data.displayName,
+    emoji: data.emoji,
+    color: data.color,
+    createdBoards: [],
+    createdAt: Date.now(),
+    isAnonymous: data.isAnonymous,
+  });
+}
 
 export async function loginWithEmail(
   credentials: LoginCredentials
@@ -54,12 +84,31 @@ export async function loginAnonymously(): Promise<UserCredential> {
   const emoji = getRandomEmoji();
   const color = getRandomColor();
 
-  await createUserProfile(userCredential.user.uid, {
+  await ensureUserProfile(userCredential.user.uid, {
     email: null,
     displayName: `Anonymous ${emoji}`,
     emoji,
     color,
     isAnonymous: true,
+  });
+
+  return userCredential;
+}
+
+export async function loginWithGoogle(): Promise<UserCredential> {
+  const provider = new GoogleAuthProvider();
+  const userCredential = await signInWithPopup(auth, provider);
+
+  const emoji = getRandomEmoji();
+  const color = getRandomColor();
+  const displayName = userCredential.user.displayName || 'Google User';
+
+  await ensureUserProfile(userCredential.user.uid, {
+    email: userCredential.user.email,
+    displayName,
+    emoji,
+    color,
+    isAnonymous: false,
   });
 
   return userCredential;
@@ -71,13 +120,7 @@ export async function signOut(): Promise<void> {
 
 export async function createUserProfile(
   userId: string,
-  data: {
-    email: string | null;
-    displayName: string;
-    emoji: string;
-    color: string;
-    isAnonymous: boolean;
-  }
+  data: UserProfileData
 ): Promise<void> {
   const userRef = ref(database, `users/${userId}`);
   await set(userRef, {

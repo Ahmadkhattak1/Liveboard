@@ -1,12 +1,9 @@
 .container {
   --grid-cell-size: 20px;
-  --grid-major-size: 100px;
   --grid-minor-offset-x: 0px;
   --grid-minor-offset-y: 0px;
-  --grid-major-offset-x: 0px;
-  --grid-major-offset-y: 0px;
-  --grid-minor-opacity-scale: 1;
-  --grid-major-opacity-scale: 1;
+  --grid-minor-opacity-scale: 1.8;
+  --grid-minor-dot-size: 1.35px;
   --canvas-min-width: 900px;
   --canvas-min-height: 560px;
   --canvas-max-width: 1800px;
@@ -19,38 +16,16 @@
   margin: auto;
   background: var(--bg);
   overflow: hidden;
-  /* Miro-style line grid background */
+  /* Whiteboard-style dot grid background */
   background-image:
-    linear-gradient(
-      to right,
-      rgb(var(--grid-minor-rgb) / calc(var(--grid-minor-opacity) * var(--grid-minor-opacity-scale))) 1px,
-      transparent 1px
-    ),
-    linear-gradient(
-      to bottom,
-      rgb(var(--grid-minor-rgb) / calc(var(--grid-minor-opacity) * var(--grid-minor-opacity-scale))) 1px,
-      transparent 1px
-    ),
-    linear-gradient(
-      to right,
-      rgb(var(--grid-major-rgb) / calc(var(--grid-major-opacity) * var(--grid-major-opacity-scale))) 1px,
-      transparent 1px
-    ),
-    linear-gradient(
-      to bottom,
-      rgb(var(--grid-major-rgb) / calc(var(--grid-major-opacity) * var(--grid-major-opacity-scale))) 1px,
-      transparent 1px
+    radial-gradient(
+      circle at 1px 1px,
+      rgb(var(--grid-minor-rgb) / calc(var(--grid-minor-opacity) * var(--grid-minor-opacity-scale)))
+        var(--grid-minor-dot-size),
+      transparent calc(var(--grid-minor-dot-size) + 0.1px)
     );
-  background-size:
-    var(--grid-cell-size) var(--grid-cell-size),
-    var(--grid-cell-size) var(--grid-cell-size),
-    var(--grid-major-size) var(--grid-major-size),
-    var(--grid-major-size) var(--grid-major-size);
-  background-position:
-    var(--grid-minor-offset-x) var(--grid-minor-offset-y),
-    var(--grid-minor-offset-x) var(--grid-minor-offset-y),
-    var(--grid-major-offset-x) var(--grid-major-offset-y),
-    var(--grid-major-offset-x) var(--grid-major-offset-y);
+  background-size: var(--grid-cell-size) var(--grid-cell-size);
+  background-position: var(--grid-minor-offset-x) var(--grid-minor-offset-y);
   cursor: default;
 }
 
@@ -64,6 +39,29 @@
 
 .hiddenFileInput {
   display: none;
+}
+
+.hydrationOverlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.04);
+  z-index: 120;
+  pointer-events: all;
+}
+
+.hydrationBadge {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15, 23, 42, 0.82);
+  color: #f8fafc;
+  border: 1px solid rgba(148, 163, 184, 0.38);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  letter-spacing: 0.1px;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.22);
 }
 
 .modeHint {
@@ -139,7 +137,7 @@
 
 .stickyPlacementPalette {
   position: fixed;
-  left: 68px;
+  left: 96px;
   top: 170px;
   padding: 8px;
   border-radius: 12px;
@@ -182,6 +180,55 @@
     0 0 0 1.5px #2563eb;
 }
 
+.remoteTrailLayer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 108;
+}
+
+.remoteCursor {
+  --remote-cursor-color: #2563eb;
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  z-index: 109;
+  transform: translate(-2px, -2px);
+}
+
+.remoteCursorPointer {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  background: var(--remote-cursor-color);
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.16);
+}
+
+.remoteCursorBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  margin-left: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.96);
+  border: 1px solid rgb(15 23 42 / 0.14);
+  font-size: 12px;
+  line-height: 1;
+  color: #111827;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.18);
+  max-width: min(220px, 42vw);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 @media (max-width: 768px) {
   .deleteButton {
     right: 12px;
@@ -201,7 +248,7 @@
   }
 
   .stickyPlacementPalette {
-    left: 58px;
+    left: 74px;
     top: 156px;
     padding: 6px;
     border-radius: 10px;
