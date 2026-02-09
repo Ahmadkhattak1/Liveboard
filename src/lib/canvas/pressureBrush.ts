@@ -382,7 +382,7 @@ export class PressureBrush extends fabric.PencilBrush {
             strokeLineJoin: this.strokeLineJoin,
             strokeMiterLimit: this.strokeMiterLimit,
             strokeDashArray: this.strokeDashArray,
-            fill: undefined,
+            fill: 'transparent',
             strokeUniform: true,
             selectable: false,
             evented: false,

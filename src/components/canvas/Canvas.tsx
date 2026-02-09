@@ -7,6 +7,7 @@ import { useCanvas } from './CanvasProvider';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { initializeFabricCanvas, resizeCanvas } from '@/lib/canvas/fabricCanvas';
 import {
+  DRAFT_SHAPE_FLAG,
   createShapeForDrag,
   finalizeDraggedShape,
   isConnectorShapeTool,
@@ -40,7 +41,11 @@ import {
   updatePresence,
   updatePresenceFields,
 } from '@/lib/firebase/database';
-import { serializeCanvas, stringifyCanvasState } from '@/lib/canvas/serialization';
+import {
+  CANVAS_SERIALIZATION_PROPS,
+  serializeCanvas,
+  stringifyCanvasState,
+} from '@/lib/canvas/serialization';
 import { APP_CONFIG, CANVAS_CONFIG } from '@/lib/constants/config';
 import { generateObjectId } from '@/lib/utils/generateId';
 import { validateImageDimensions, validateImageFile } from '@/lib/utils/validators';
@@ -129,8 +134,16 @@ const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 5;
 const KEYBOARD_PAN_STEP = 80;
 const KEYBOARD_PAN_STEP_FAST = 220;
-const GRID_MINOR_BASE = 16;
-const GRID_MINOR_MIN_SCREEN_SPACING = 18;
+const GRID_REFERENCE_ZOOM = 1.12;
+const GRID_REFERENCE_SPACING = 18;
+const GRID_SPACING_SWING = 7.2;
+const GRID_MIN_SCREEN_SPACING = GRID_REFERENCE_SPACING - GRID_SPACING_SWING;
+const GRID_MAX_SCREEN_SPACING = GRID_REFERENCE_SPACING + GRID_SPACING_SWING;
+const GRID_ZOOM_RESPONSE = 0.85;
+const GRID_DOT_MIN_SIZE = 1.08;
+const GRID_DOT_MAX_SIZE = 1.78;
+const GRID_OPACITY_MIN_SCALE = 1.46;
+const GRID_OPACITY_MAX_SCALE = 2.04;
 const IMAGE_PASTE_OFFSET = 24;
 const IMAGE_PASTE_NOTICE_TIMEOUT_MS = 3800;
 const CANVAS_SYNC_DEBOUNCE_MS = 220;
@@ -140,6 +153,7 @@ const DRAW_TRAIL_SYNC_INTERVAL_MS = 80;
 const DRAW_TRAIL_MAX_POINTS = 32;
 const DRAW_TRAIL_MIN_DISTANCE = 0.8;
 const REMOTE_CURSOR_TTL_MS = 45_000;
+const CANVAS_SYNC_DEBUG = process.env.NEXT_PUBLIC_CANVAS_SYNC_DEBUG === 'true';
 const CANVAS_CACHE_KEY_PREFIX = 'liveboard-canvas-cache:';
 const OPEN_IMAGE_PICKER_EVENT = 'liveboard:open-image-picker';
 const STICKY_CURSOR =
@@ -159,8 +173,58 @@ interface PresenceIdentity {
   color: string;
 }
 
+interface PendingCanvasPersist {
+  state: BoardCanvas;
+  hash: string;
+  mutationOrder: number;
+}
+
+type SerializedCanvasObject = Record<string, unknown>;
+
+type DraftShapeObject = fabric.Object & {
+  [DRAFT_SHAPE_FLAG]?: boolean;
+};
+
+type PendingCanvasMutation =
+  | {
+      kind: 'upsert';
+      object: SerializedCanvasObject;
+      updatedAt: number;
+      order: number;
+    }
+  | {
+      kind: 'delete';
+      deletedAt: number;
+      order: number;
+    };
+
+function logCanvasSync(...args: unknown[]): void {
+  if (!CANVAS_SYNC_DEBUG) {
+    return;
+  }
+  console.debug('[CanvasSync]', ...args);
+}
+
 function roundCoordinate(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+function readSerializedObjectId(value: unknown): string | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const id = (value as { id?: unknown }).id;
+  return typeof id === 'string' && id.length > 0 ? id : null;
+}
+
+function serializeCanvasObject(object: fabric.Object): SerializedCanvasObject | null {
+  const serializer = object as fabric.Object & {
+    toObject: (propertiesToInclude?: string[]) => SerializedCanvasObject;
+  };
+  if (typeof serializer.toObject !== 'function') {
+    return null;
+  }
+  return serializer.toObject([...CANVAS_SERIALIZATION_PROPS]);
 }
 
 function ensureTrackedMetadata(
@@ -193,14 +257,64 @@ function ensureTrackedMetadata(
   }
 }
 
+function isDraftShapeObject(object: fabric.Object | undefined): object is DraftShapeObject {
+  if (!object) {
+    return false;
+  }
+  return Boolean((object as DraftShapeObject)[DRAFT_SHAPE_FLAG]);
+}
+
+function normalizeCanvasBackground(value: unknown): string {
+  if (typeof value !== 'string') {
+    return 'transparent';
+  }
+
+  const trimmedValue = value.trim();
+  if (trimmedValue.length === 0) {
+    return 'transparent';
+  }
+
+  // Legacy board payloads used an opaque white background which hides the CSS dot grid.
+  const compactValue = trimmedValue.toLowerCase().replace(/\s+/g, '');
+  if (
+    compactValue === '#fff' ||
+    compactValue === '#ffffff' ||
+    compactValue === 'white' ||
+    compactValue === 'rgb(255,255,255)' ||
+    compactValue === 'rgba(255,255,255,1)' ||
+    compactValue === 'rgba(255,255,255,100%)'
+  ) {
+    return 'transparent';
+  }
+
+  return trimmedValue;
+}
+
 function normalizeBoardCanvasState(value: BoardCanvas | null | undefined): BoardCanvas {
-  const objects = Array.isArray(value?.objects) ? value.objects : [];
+  const rawObjects = Array.isArray(value?.objects) ? value.objects : [];
+  const seenObjectIds = new Set<string>();
+  const objects: unknown[] = [];
+
+  // Keep the latest occurrence for duplicate object IDs that may exist in
+  // corrupted remote payloads.
+  for (let index = rawObjects.length - 1; index >= 0; index -= 1) {
+    const object = rawObjects[index];
+    const objectId = readSerializedObjectId(object);
+    if (objectId) {
+      if (seenObjectIds.has(objectId)) {
+        continue;
+      }
+      seenObjectIds.add(objectId);
+    }
+    objects.push(object);
+  }
+  objects.reverse();
+
   const version =
     typeof value?.version === 'string' && value.version.length > 0
       ? value.version
       : '6.0.0';
-  const background =
-    typeof value?.background === 'string' ? value.background : '#ffffff';
+  const background = normalizeCanvasBackground(value?.background);
 
   return {
     ...(value ?? {}),
@@ -320,29 +434,66 @@ function getViewportCenterInScene(canvas: fabric.Canvas): { x: number; y: number
   };
 }
 
-function smoothstep(edge0: number, edge1: number, value: number): number {
+function clampNumber(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) {
-    return 0;
+    return min;
   }
-  if (edge0 === edge1) {
-    return value >= edge1 ? 1 : 0;
-  }
-  const t = Math.max(0, Math.min(1, (value - edge0) / (edge1 - edge0)));
-  return t * t * (3 - 2 * t);
+  return Math.max(min, Math.min(max, value));
 }
 
-function softClampGridSize(rawSize: number, minSize: number): number {
-  if (!Number.isFinite(rawSize) || rawSize <= 0) {
-    return minSize;
+function normalizeNumber(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value) || max <= min) {
+    return 0;
   }
+  return clampNumber((value - min) / (max - min), 0, 1);
+}
 
-  if (rawSize >= minSize) {
-    return rawSize;
+function lerpNumber(start: number, end: number, t: number): number {
+  return start + (end - start) * clampNumber(t, 0, 1);
+}
+
+function resolveGridOffset(translation: number, cellSize: number): number {
+  if (!Number.isFinite(translation) || !Number.isFinite(cellSize) || cellSize <= 0) {
+    return 0;
   }
+  return translation % cellSize;
+}
 
-  // Smoothly converge to minSize as zoom goes out to avoid abrupt grid snapping.
-  const smooth = smoothstep(0, minSize, rawSize);
-  return minSize + (rawSize - minSize) * smooth;
+function resolveGridVisualMetrics(zoomLevel: number): {
+  cellSize: number;
+  dotSize: number;
+  opacityScale: number;
+} {
+  const safeZoom = clampNumber(zoomLevel, MIN_ZOOM, MAX_ZOOM);
+  const zoomDelta = Math.log(safeZoom / GRID_REFERENCE_ZOOM);
+  const cellSize = clampNumber(
+    GRID_REFERENCE_SPACING + GRID_SPACING_SWING * Math.tanh(zoomDelta * GRID_ZOOM_RESPONSE),
+    GRID_MIN_SCREEN_SPACING,
+    GRID_MAX_SCREEN_SPACING
+  );
+  const normalizedCellSize = normalizeNumber(
+    cellSize,
+    GRID_MIN_SCREEN_SPACING,
+    GRID_MAX_SCREEN_SPACING
+  );
+
+  return {
+    cellSize,
+    dotSize: lerpNumber(GRID_DOT_MIN_SIZE, GRID_DOT_MAX_SIZE, normalizedCellSize),
+    opacityScale: lerpNumber(
+      GRID_OPACITY_MIN_SCALE,
+      GRID_OPACITY_MAX_SCALE,
+      normalizedCellSize
+    ),
+  };
+}
+
+function resolveGridZoomLevel(canvas: fabric.Canvas): number {
+  const zoomLevel = canvas.getZoom();
+  if (!Number.isFinite(zoomLevel) || zoomLevel <= 0) {
+    return MIN_ZOOM;
+  }
+  return clampNumber(zoomLevel, MIN_ZOOM, MAX_ZOOM);
 }
 
 function resolveCanvasConstraint(value: number, fallback: number): number {
@@ -400,10 +551,12 @@ export function Canvas() {
   const activeToolRef = useRef(activeTool);
   const [viewportTick, setViewportTick] = React.useState(0);
   const canvasSyncTimerRef = useRef<number | null>(null);
-  const pendingCanvasPersistRef = useRef<{ state: BoardCanvas; hash: string } | null>(null);
+  const pendingCanvasPersistRef = useRef<PendingCanvasPersist | null>(null);
   const isPersistingCanvasRef = useRef(false);
   const isApplyingRemoteCanvasRef = useRef(false);
   const lastCanvasHashRef = useRef<string | null>(null);
+  const pendingCanvasMutationsRef = useRef<Map<string, PendingCanvasMutation>>(new Map());
+  const pendingMutationOrderRef = useRef(0);
   const cursorFlushTimerRef = useRef<number | null>(null);
   const queuedCursorRef = useRef<{ x: number; y: number } | null>(null);
   const lastCursorSentAtRef = useRef(0);
@@ -412,7 +565,6 @@ export function Canvas() {
   const localDrawingTrailRef = useRef<Array<{ x: number; y: number }>>([]);
   const lastDrawingSentAtRef = useRef(0);
   const isLocalDrawingRef = useRef(false);
-  const lastLocalMutationAtRef = useRef(0);
   const viewportTickThrottleRef = useRef(0);
   const hasSeenInitialRemoteCanvasRef = useRef(false);
   const autoLoginAttemptedRef = useRef(false);
@@ -503,25 +655,30 @@ export function Canvas() {
     const syncGridToViewport = () => {
       if (!containerRef.current) return;
 
-      const zoomLevel = Math.max(MIN_ZOOM, canvas.getZoom());
-      const rawMinorSize = GRID_MINOR_BASE * zoomLevel;
-      const minorSize = Math.max(
-        1,
-        softClampGridSize(rawMinorSize, GRID_MINOR_MIN_SCREEN_SPACING)
-      );
+      const zoomLevel = resolveGridZoomLevel(canvas);
+      const { cellSize, dotSize, opacityScale } = resolveGridVisualMetrics(zoomLevel);
       const vpt = canvas.viewportTransform;
       const translateX = vpt?.[4] ?? 0;
       const translateY = vpt?.[5] ?? 0;
+      const offsetX = roundCoordinate(resolveGridOffset(translateX, cellSize));
+      const offsetY = roundCoordinate(resolveGridOffset(translateY, cellSize));
 
-      containerRef.current.style.setProperty('--grid-cell-size', `${minorSize}px`);
-      containerRef.current.style.setProperty('--grid-minor-opacity-scale', '1.8');
+      containerRef.current.style.setProperty('--grid-cell-size', `${roundCoordinate(cellSize)}px`);
+      containerRef.current.style.setProperty(
+        '--grid-minor-dot-size',
+        `${roundCoordinate(dotSize)}px`
+      );
+      containerRef.current.style.setProperty(
+        '--grid-minor-opacity-scale',
+        opacityScale.toFixed(3)
+      );
       containerRef.current.style.setProperty(
         '--grid-minor-offset-x',
-        `${translateX}px`
+        `${offsetX}px`
       );
       containerRef.current.style.setProperty(
         '--grid-minor-offset-y',
-        `${translateY}px`
+        `${offsetY}px`
       );
     };
 
@@ -538,6 +695,8 @@ export function Canvas() {
     setCanvasHydrated(false);
     setShowHydrationOverlay(false);
     pendingCanvasPersistRef.current = null;
+    pendingCanvasMutationsRef.current.clear();
+    pendingMutationOrderRef.current = 0;
     lastCanvasHashRef.current = null;
   }, [boardId, canvas]);
 
@@ -581,6 +740,66 @@ export function Canvas() {
       });
   }, [boardId, canvas]);
 
+  const enqueueObjectUpsertMutation = React.useCallback(
+    (object: fabric.Object | undefined) => {
+      if (!object) {
+        return;
+      }
+
+      ensureTrackedMetadata(object, actorId);
+      const trackedObject = object as TrackedCanvasObject;
+      if (!trackedObject.id) {
+        return;
+      }
+
+      const serializedObject = serializeCanvasObject(object);
+      if (!serializedObject) {
+        return;
+      }
+
+      const updatedAt =
+        typeof trackedObject.updatedAt === 'number' && Number.isFinite(trackedObject.updatedAt)
+          ? trackedObject.updatedAt
+          : Date.now();
+      pendingCanvasMutationsRef.current.set(trackedObject.id, {
+        kind: 'upsert',
+        object: serializedObject,
+        updatedAt,
+        order: pendingMutationOrderRef.current++,
+      });
+    },
+    [actorId]
+  );
+
+  const enqueueObjectDeleteMutation = React.useCallback((object: fabric.Object | undefined) => {
+    if (!object) {
+      return;
+    }
+
+    const trackedObject = object as TrackedCanvasObject;
+    if (!trackedObject.id) {
+      return;
+    }
+
+    pendingCanvasMutationsRef.current.set(trackedObject.id, {
+      kind: 'delete',
+      deletedAt: Date.now(),
+      order: pendingMutationOrderRef.current++,
+    });
+  }, []);
+
+  const prunePersistedMutations = React.useCallback((maxMutationOrder: number) => {
+    if (maxMutationOrder < 0) {
+      return;
+    }
+
+    for (const [objectId, mutation] of pendingCanvasMutationsRef.current.entries()) {
+      if (mutation.order <= maxMutationOrder) {
+        pendingCanvasMutationsRef.current.delete(objectId);
+      }
+    }
+  }, []);
+
   const flushCanvasPersist = React.useCallback(async () => {
     if (!boardId || !syncUserId) {
       return;
@@ -597,6 +816,7 @@ export function Canvas() {
       await saveBoardCanvasState(boardId, nextPersist.state, syncUserId);
       writeCachedBoardCanvas(boardId, nextPersist.state);
       lastCanvasHashRef.current = nextPersist.hash;
+      prunePersistedMutations(nextPersist.mutationOrder);
     } catch (error) {
       console.error('Error syncing canvas state:', error);
     } finally {
@@ -605,7 +825,67 @@ export function Canvas() {
         void flushCanvasPersist();
       }
     }
-  }, [boardId, syncUserId]);
+  }, [boardId, prunePersistedMutations, syncUserId]);
+
+  const persistCanvasNow = React.useCallback(() => {
+    if (
+      !canvas ||
+      !boardId ||
+      !syncUserId ||
+      !hasSeenInitialRemoteCanvasRef.current ||
+      isApplyingRemoteCanvasRef.current
+    ) {
+      return;
+    }
+
+    if (canvasSyncTimerRef.current !== null) {
+      window.clearTimeout(canvasSyncTimerRef.current);
+      canvasSyncTimerRef.current = null;
+    }
+
+    // Temporarily discard any ActiveSelection so that objects are serialized
+    // with their absolute canvas coordinates instead of group-relative ones.
+    const activeObject = canvas.getActiveObject();
+    const selectedObjects =
+      activeObject instanceof fabric.ActiveSelection
+        ? [...canvas.getActiveObjects()]
+        : [];
+    if (selectedObjects.length > 0) {
+      canvas.discardActiveObject();
+    }
+
+    canvas.getObjects().forEach((object) => {
+      ensureTrackedMetadata(object, actorId, { touchUpdated: false });
+    });
+
+    const serializedCanvas = serializeCanvas(canvas);
+    const normalizedCanvas = normalizeBoardCanvasState(serializedCanvas as BoardCanvas);
+    const nextHash = stringifyCanvasState(normalizedCanvas);
+    const pendingHash = pendingCanvasPersistRef.current?.hash ?? null;
+
+    if (nextHash === lastCanvasHashRef.current && nextHash === pendingHash) {
+      if (selectedObjects.length > 0) {
+        const sel = new fabric.ActiveSelection(selectedObjects, { canvas });
+        canvas.setActiveObject(sel);
+      }
+      return;
+    }
+
+    writeCachedBoardCanvas(boardId, normalizedCanvas);
+
+    pendingCanvasPersistRef.current = {
+      state: normalizedCanvas,
+      hash: nextHash,
+      mutationOrder: pendingMutationOrderRef.current - 1,
+    };
+    void flushCanvasPersist();
+
+    // Restore the multi-selection so the user doesn't lose their selection.
+    if (selectedObjects.length > 0) {
+      const sel = new fabric.ActiveSelection(selectedObjects, { canvas });
+      canvas.setActiveObject(sel);
+    }
+  }, [actorId, boardId, canvas, flushCanvasPersist, syncUserId]);
 
   const scheduleCanvasPersist = React.useCallback(() => {
     if (
@@ -624,31 +904,9 @@ export function Canvas() {
     }
 
     canvasSyncTimerRef.current = window.setTimeout(() => {
-      canvasSyncTimerRef.current = null;
-      if (isApplyingRemoteCanvasRef.current) {
-        return;
-      }
-
-      canvas.getObjects().forEach((object) => {
-        ensureTrackedMetadata(object, actorId, { touchUpdated: false });
-      });
-
-      const serializedCanvas = serializeCanvas(canvas);
-      const normalizedCanvas = normalizeBoardCanvasState(serializedCanvas as BoardCanvas);
-      const nextHash = stringifyCanvasState(normalizedCanvas);
-      if (nextHash === lastCanvasHashRef.current) {
-        return;
-      }
-
-      writeCachedBoardCanvas(boardId, normalizedCanvas);
-
-      pendingCanvasPersistRef.current = {
-        state: normalizedCanvas,
-        hash: nextHash,
-      };
-      void flushCanvasPersist();
+      persistCanvasNow();
     }, CANVAS_SYNC_DEBOUNCE_MS);
-  }, [actorId, boardId, canvas, canvasHydrated, flushCanvasPersist, syncUserId]);
+  }, [boardId, canvas, canvasHydrated, persistCanvasNow, syncUserId]);
 
   useEffect(() => {
     return () => {
@@ -688,8 +946,17 @@ export function Canvas() {
       const normalizedState = normalizeBoardCanvasState(remoteCanvasState);
       writeCachedBoardCanvas(boardId, normalizedState);
       const remoteHash = stringifyCanvasState(normalizedState);
+      logCanvasSync('remote:update', {
+        boardId,
+        remoteObjects: normalizedState.objects.length,
+      });
 
       if (remoteHash === lastCanvasHashRef.current) {
+        if (pendingCanvasPersistRef.current?.hash === remoteHash) {
+          pendingCanvasPersistRef.current = null;
+          pendingCanvasMutationsRef.current.clear();
+        }
+        logCanvasSync('remote:skip:lastHash');
         markHydrated();
         return;
       }
@@ -697,26 +964,30 @@ export function Canvas() {
       const localHash = stringifyCanvasState(serializeCanvas(canvas));
       if (remoteHash === localHash) {
         lastCanvasHashRef.current = remoteHash;
+        pendingCanvasPersistRef.current = null;
+        pendingCanvasMutationsRef.current.clear();
+        logCanvasSync('remote:skip:matchesLocal');
         markHydrated();
         return;
       }
 
       const pendingLocalHash = pendingCanvasPersistRef.current?.hash ?? null;
-      if (pendingLocalHash && pendingLocalHash !== remoteHash) {
+      const hasPendingMutations = pendingCanvasMutationsRef.current.size > 0;
+
+      if (pendingLocalHash !== null || hasPendingMutations) {
+        logCanvasSync('remote:defer:pendingLocal', {
+          pendingHash: pendingLocalHash,
+          hasPendingMutations,
+          pendingMutationCount: pendingCanvasMutationsRef.current.size,
+        });
         markHydrated();
         return;
       }
 
-      const remoteUpdatedAt =
-        typeof normalizedState.updatedAt === 'number' && Number.isFinite(normalizedState.updatedAt)
-          ? normalizedState.updatedAt
-          : 0;
-      const localMutationAt = lastLocalMutationAtRef.current;
-      if (localMutationAt > 0 && (remoteUpdatedAt === 0 || remoteUpdatedAt < localMutationAt)) {
-        markHydrated();
-        return;
-      }
-
+      logCanvasSync('remote:applyToCanvas', {
+        boardId,
+        remoteObjects: normalizedState.objects.length,
+      });
       isApplyingRemoteCanvasRef.current = true;
       void canvas
         .loadFromJSON(normalizedState as unknown as Record<string, unknown>)
@@ -739,7 +1010,7 @@ export function Canvas() {
       window.clearTimeout(hydrationTimeout);
       unsubscribe();
     };
-  }, [boardId, canvas]);
+  }, [boardId, canvas, flushCanvasPersist]);
 
   useEffect(() => {
     if (!canvas || !boardId || !syncUserId) {
@@ -750,8 +1021,14 @@ export function Canvas() {
       if (isApplyingRemoteCanvasRef.current) {
         return;
       }
-      lastLocalMutationAtRef.current = Date.now();
-      ensureTrackedMetadata(event.target, actorId);
+      if (isDraftShapeObject(event.target)) {
+        return;
+      }
+      logCanvasSync('local:objectAdded', {
+        type: event.target?.type,
+        id: (event.target as TrackedCanvasObject | undefined)?.id ?? null,
+      });
+      enqueueObjectUpsertMutation(event.target);
       scheduleCanvasPersist();
     };
 
@@ -759,16 +1036,35 @@ export function Canvas() {
       if (isApplyingRemoteCanvasRef.current) {
         return;
       }
-      lastLocalMutationAtRef.current = Date.now();
-      ensureTrackedMetadata(event.target, actorId);
+      if (isDraftShapeObject(event.target)) {
+        return;
+      }
+      logCanvasSync('local:objectModified', {
+        type: event.target?.type,
+        id: (event.target as TrackedCanvasObject | undefined)?.id ?? null,
+      });
+      // When the target is an ActiveSelection (multi-select move/resize),
+      // enqueue mutations for each individual object so the pending-mutation
+      // guard correctly prevents stale remote overwrites.
+      if (event.target instanceof fabric.ActiveSelection) {
+        event.target.getObjects().forEach((obj) => {
+          enqueueObjectUpsertMutation(obj);
+        });
+      } else {
+        enqueueObjectUpsertMutation(event.target);
+      }
       scheduleCanvasPersist();
     };
 
-    const handleObjectRemoved = () => {
+    const handleObjectRemoved = (event: { target?: fabric.Object }) => {
       if (isApplyingRemoteCanvasRef.current) {
         return;
       }
-      lastLocalMutationAtRef.current = Date.now();
+      logCanvasSync('local:objectRemoved', {
+        type: event.target?.type,
+        id: (event.target as TrackedCanvasObject | undefined)?.id ?? null,
+      });
+      enqueueObjectDeleteMutation(event.target);
       scheduleCanvasPersist();
     };
 
@@ -776,17 +1072,20 @@ export function Canvas() {
       if (isApplyingRemoteCanvasRef.current) {
         return;
       }
-      lastLocalMutationAtRef.current = Date.now();
-      ensureTrackedMetadata(event.path, actorId);
+      logCanvasSync('local:pathCreated', {
+        type: event.path?.type,
+        id: (event.path as TrackedCanvasObject | undefined)?.id ?? null,
+      });
+      enqueueObjectUpsertMutation(event.path);
       scheduleCanvasPersist();
+      persistCanvasNow();
     };
 
     const handleTextChanged = (event: { target?: fabric.Object }) => {
       if (isApplyingRemoteCanvasRef.current) {
         return;
       }
-      lastLocalMutationAtRef.current = Date.now();
-      ensureTrackedMetadata(event.target, actorId);
+      enqueueObjectUpsertMutation(event.target);
       scheduleCanvasPersist();
     };
 
@@ -803,7 +1102,15 @@ export function Canvas() {
       canvas.off('path:created', handlePathCreated);
       canvas.off('text:changed', handleTextChanged);
     };
-  }, [actorId, boardId, canvas, scheduleCanvasPersist, syncUserId]);
+  }, [
+    boardId,
+    canvas,
+    enqueueObjectDeleteMutation,
+    enqueueObjectUpsertMutation,
+    persistCanvasNow,
+    scheduleCanvasPersist,
+    syncUserId,
+  ]);
 
   useEffect(() => {
     if (!canvas || !boardId || !syncUserId || !canvasHydrated) {
@@ -818,16 +1125,27 @@ export function Canvas() {
       return;
     }
 
-    const handleRenderSnapshot = () => {
-      scheduleCanvasPersist();
+    const flushForNavigation = () => {
+      persistCanvasNow();
     };
 
-    canvas.on('after:render', handleRenderSnapshot);
+    const handleVisibilityFlush = () => {
+      if (document.visibilityState !== 'hidden') {
+        return;
+      }
+      flushForNavigation();
+    };
+
+    window.addEventListener('pagehide', flushForNavigation);
+    window.addEventListener('beforeunload', flushForNavigation);
+    document.addEventListener('visibilitychange', handleVisibilityFlush);
 
     return () => {
-      canvas.off('after:render', handleRenderSnapshot);
+      window.removeEventListener('pagehide', flushForNavigation);
+      window.removeEventListener('beforeunload', flushForNavigation);
+      document.removeEventListener('visibilitychange', handleVisibilityFlush);
     };
-  }, [boardId, canvas, scheduleCanvasPersist, syncUserId]);
+  }, [boardId, canvas, persistCanvasNow, syncUserId]);
 
   useEffect(() => {
     if (!syncUserId) {
@@ -1450,18 +1768,6 @@ export function Canvas() {
         brush.strokeLineCap = 'round';
         brush.strokeLineJoin = 'round';
         canvas.freeDrawingBrush = brush;
-
-        // Add ID to newly created paths
-        const handlePathCreated = (e: any) => {
-          const path = e.path;
-          (path as any).id = `path-${Date.now()}`;
-          (path as any).createdBy = actorId;
-        };
-        canvas.on('path:created', handlePathCreated);
-
-        cleanup = () => {
-          canvas.off('path:created', handlePathCreated);
-        };
         break;
       }
 
@@ -1479,9 +1785,9 @@ export function Canvas() {
       case 'elbowArrow':
       case 'curvedArrow': {
         const shapeTool: ShapeToolType = activeTool;
-        // Keep target finding enabled so existing shapes can be selected naturally.
+        // Shape mode should always draw, even when starting over an existing object.
         canvas.selection = false;
-        canvas.skipTargetFind = false;
+        canvas.skipTargetFind = true;
 
         let isDraggingShape = false;
         let dragStart: { x: number; y: number } | null = null;
@@ -1492,13 +1798,6 @@ export function Canvas() {
         ) => {
           const pointerEvent = event.e as MouseEvent;
           if (pointerEvent.button !== undefined && pointerEvent.button !== 0) {
-            return;
-          }
-
-          // In shape mode, clicking an existing object should select it, not spawn a new shape.
-          if (event.target) {
-            canvas.setActiveObject(event.target);
-            canvas.requestRenderAll();
             return;
           }
 
@@ -1546,15 +1845,16 @@ export function Canvas() {
           }, {
             perfect: Boolean((event.e as MouseEvent).shiftKey),
           });
+          delete (activeShape as DraftShapeObject)[DRAFT_SHAPE_FLAG];
           activeShape.set({
             selectable: true,
             evented: true,
           });
           activeShape.setCoords();
           canvas.setActiveObject(activeShape);
+          enqueueObjectUpsertMutation(activeShape);
+          scheduleCanvasPersist();
           canvas.requestRenderAll();
-          // One-shot behavior prevents accidental repeated shape creation.
-          setActiveTool('select');
           isDraggingShape = false;
           dragStart = null;
           activeShape = null;
@@ -1660,6 +1960,8 @@ export function Canvas() {
     fillColor,
     strokeWidth,
     pressureSimulation,
+    enqueueObjectUpsertMutation,
+    scheduleCanvasPersist,
     setActiveTool,
     stickyPlacementColor,
   ]);

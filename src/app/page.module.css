@@ -216,6 +216,74 @@
   color: #ffffff;
 }
 
+.joinPanel {
+  padding: 16px;
+  border: 1.5px solid #111111;
+  border-radius: 16px;
+  background: #f6f6f6;
+}
+
+.joinTitle {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.joinText {
+  margin: 8px 0 0;
+  font-size: 14px;
+  color: #505050;
+}
+
+.joinForm {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.joinInput {
+  min-height: 42px;
+  flex: 1 1 240px;
+  min-width: 0;
+  padding: 0 12px;
+  border: 1.5px solid #111111;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #111111;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.joinInput::placeholder {
+  color: #8a8a8a;
+  letter-spacing: 0.08em;
+}
+
+.joinButton {
+  min-height: 42px;
+  padding: 0 14px;
+  border: 2px solid #111111;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #111111;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.joinButton:hover {
+  background: #111111;
+  color: #ffffff;
+}
+
+.joinButton:disabled {
+  opacity: 0.55;
+}
+
 .emptyPanel {
   padding: 48px 24px;
   border: 1.5px dashed #111111;
@@ -472,6 +540,164 @@
   padding-bottom: 56px;
 }
 
+.shareModalCard {
+  width: min(480px, 100%);
+  border: 1.25px solid #111111;
+  border-radius: 16px;
+  background: #ffffff;
+}
+
+.shareModalHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px;
+  border-bottom: 1px solid #e6e6e6;
+  background: #f8f8f8;
+}
+
+.shareModalTitle {
+  margin: 0;
+  font-size: 21px;
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+}
+
+.shareModalSubtitle {
+  margin: 6px 0 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #5f5f5f;
+}
+
+.shareModalClose {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1.5px solid #111111;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #111111;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.shareModalClose:hover {
+  background: #111111;
+  color: #ffffff;
+}
+
+.shareModalClose:disabled {
+  opacity: 0.55;
+}
+
+.shareModalBody {
+  padding: 16px;
+}
+
+.shareModalText {
+  margin: 0;
+  font-size: 14px;
+  color: #4f4f4f;
+}
+
+.shareVisibilityButton {
+  margin-top: 12px;
+  width: 100%;
+  min-height: 42px;
+  padding: 0 14px;
+  border: 2px solid #111111;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.shareVisibilityPublic {
+  background: #d3f3da;
+  color: #163d1f;
+}
+
+.shareVisibilityPrivate {
+  background: #f2f2f2;
+  color: #111111;
+}
+
+.shareVisibilityButton:disabled {
+  opacity: 0.55;
+}
+
+.shareCodePanel {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1.25px dashed #111111;
+  border-radius: 12px;
+  background: #f7f7f7;
+}
+
+.shareCodeLabel {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #5f5f5f;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.shareCodeRow {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.shareCodeValue {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1.5px solid #111111;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #111111;
+  font-size: 21px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.shareCodeCopyButton {
+  min-height: 38px;
+  padding: 0 12px;
+  border: 2px solid #111111;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #111111;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.shareCodeCopyButton:hover {
+  background: #111111;
+  color: #ffffff;
+}
+
+.shareCodeCopyButton:disabled {
+  opacity: 0.55;
+}
+
+.shareCodeHint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #5f5f5f;
+}
+
+.sharePrivateHint {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: #5a5a5a;
+}
+
 .cardTitle {
   margin: 0;
   font-size: 27px;
@@ -646,6 +872,32 @@
     margin-top: 0;
   }
 
+  .joinPanel {
+    padding: 12px;
+  }
+
+  .joinTitle {
+    font-size: 17px;
+  }
+
+  .joinText {
+    font-size: 13px;
+  }
+
+  .joinForm {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .joinInput {
+    width: 100%;
+    flex: none;
+  }
+
+  .joinButton {
+    width: 100%;
+  }
+
   .boardRow {
     padding-right: 0;
   }
@@ -698,6 +950,10 @@
     border-radius: 16px;
   }
 
+  .shareModalCard {
+    width: 100%;
+  }
+
   .emojiModalHeader {
     padding: 12px;
   }
@@ -717,6 +973,26 @@
 
   .emojiModalPicker {
     padding: 8px;
+  }
+
+  .shareModalHeader {
+    padding: 12px;
+  }
+
+  .shareModalTitle {
+    font-size: 18px;
+  }
+
+  .shareModalSubtitle {
+    font-size: 11px;
+  }
+
+  .shareModalBody {
+    padding: 12px;
+  }
+
+  .shareCodeValue {
+    font-size: 18px;
   }
 
   .cardSide {

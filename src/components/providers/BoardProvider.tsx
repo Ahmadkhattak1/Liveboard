@@ -1,8 +1,13 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { Board } from '@/types/board';
-import { getBoard, subscribeToBoard } from '@/lib/firebase/database';
+import { getBoard } from '@/lib/firebase/database';
+import { useAuth } from '@/components/providers/AuthProvider';
+import {
+  getBoardShareCodeStorageKey,
+  normalizeShareCode
+} from '@/lib/utils/shareCode';
 
 interface BoardContextType {
   board: Board | null;
@@ -18,55 +23,131 @@ interface BoardProviderProps {
   children: React.ReactNode;
 }
 
+function getBoardErrorMessage(boardData: Board): string {
+  if (boardData.metadata.isPublic) {
+    return 'Access code required. Enter the code on the home page and try again.';
+  }
+
+  return 'This board is private.';
+}
+
 export function BoardProvider({ boardId, children }: BoardProviderProps) {
+  const { user, loading: authLoading } = useAuth();
   const [board, setBoard] = useState<Board | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  type BoardAccessResult =
+    | { allowed: true; board: Board }
+    | { allowed: false; message: string };
+
+  const canAccessBoard = useCallback((boardData: Board): boolean => {
+    const currentUserId = user?.id ?? null;
+    if (currentUserId && boardData.metadata.createdBy === currentUserId) {
+      return true;
+    }
+
+    if (!boardData.metadata.isPublic) {
+      return false;
+    }
+
+    const requiredCode = normalizeShareCode(
+      typeof boardData.metadata.shareCode === 'string' ? boardData.metadata.shareCode : ''
+    );
+    if (!requiredCode) {
+      return true;
+    }
+
+    if (typeof window === 'undefined') {
+      return false;
+    }
+
+    const codeFromUrl = normalizeShareCode(
+      new URL(window.location.href).searchParams.get('code') ?? ''
+    );
+    const storageKey = getBoardShareCodeStorageKey(boardId);
+    const codeFromStorage = normalizeShareCode(
+      window.localStorage.getItem(storageKey) ?? ''
+    );
+    const isAuthorized = codeFromUrl === requiredCode || codeFromStorage === requiredCode;
+
+    if (isAuthorized && codeFromStorage !== requiredCode) {
+      window.localStorage.setItem(storageKey, requiredCode);
+    }
+
+    return isAuthorized;
+  }, [boardId, user?.id]);
+
+  const loadBoardWithAccessCheck = useCallback(async (): Promise<BoardAccessResult> => {
+    const boardData = await getBoard(boardId);
+    if (!boardData) {
+      return { allowed: false, message: 'Board not found' };
+    }
+
+    if (!canAccessBoard(boardData)) {
+      return { allowed: false, message: getBoardErrorMessage(boardData) };
+    }
+
+    return { allowed: true, board: boardData };
+  }, [boardId, canAccessBoard]);
+
   useEffect(() => {
-    let unsubscribe: (() => void) | undefined;
+    if (authLoading) {
+      return;
+    }
+
+    let isCancelled = false;
 
     async function loadBoard() {
       try {
         setLoading(true);
         setError(null);
 
-        const boardData = await getBoard(boardId);
-        if (!boardData) {
-          setError('Board not found');
-          setLoading(false);
+        const accessResult = await loadBoardWithAccessCheck();
+        if (isCancelled) {
           return;
         }
 
-        setBoard(boardData);
+        if (!accessResult.allowed) {
+          setBoard(null);
+          setError(accessResult.message);
+          return;
+        }
 
-        unsubscribe = subscribeToBoard(boardId, (updatedBoard) => {
-          setBoard(updatedBoard);
-        });
-
-        setLoading(false);
+        setBoard(accessResult.board);
+        setError(null);
       } catch (err) {
+        if (isCancelled) {
+          return;
+        }
         console.error('Error loading board:', err);
+        setBoard(null);
         setError('Failed to load board');
-        setLoading(false);
+      } finally {
+        if (!isCancelled) {
+          setLoading(false);
+        }
       }
     }
 
     loadBoard();
 
     return () => {
-      if (unsubscribe) {
-        unsubscribe();
-      }
+      isCancelled = true;
     };
-  }, [boardId]);
+  }, [authLoading, loadBoardWithAccessCheck]);
 
   const refreshBoard = async () => {
     try {
-      const boardData = await getBoard(boardId);
-      if (boardData) {
-        setBoard(boardData);
+      const accessResult = await loadBoardWithAccessCheck();
+      if (!accessResult.allowed) {
+        setBoard(null);
+        setError(accessResult.message);
+        return;
       }
+
+      setBoard(accessResult.board);
+      setError(null);
     } catch (err) {
       console.error('Error refreshing board:', err);
     }

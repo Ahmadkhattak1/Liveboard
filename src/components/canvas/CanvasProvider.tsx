@@ -34,7 +34,26 @@ const HISTORY_DEBOUNCE_MS = 140;
 const HISTORY_LIMIT = 120;
 
 function serializeCanvasState(canvas: fabric.Canvas): string {
-  return stringifyCanvasState(serializeCanvas(canvas));
+  // When objects are in an ActiveSelection their left/top are group-relative.
+  // Temporarily discard the selection so we capture absolute coordinates.
+  const activeObject = canvas.getActiveObject();
+  const selectedObjects =
+    activeObject instanceof fabric.ActiveSelection
+      ? [...canvas.getActiveObjects()]
+      : [];
+  if (selectedObjects.length > 0) {
+    canvas.discardActiveObject();
+  }
+
+  const state = stringifyCanvasState(serializeCanvas(canvas));
+
+  // Restore the selection.
+  if (selectedObjects.length > 0) {
+    const sel = new fabric.ActiveSelection(selectedObjects, { canvas });
+    canvas.setActiveObject(sel);
+  }
+
+  return state;
 }
 
 export function CanvasProvider({ children }: { children: React.ReactNode }) {
@@ -43,7 +62,7 @@ export function CanvasProvider({ children }: { children: React.ReactNode }) {
   const [strokeColor, setStrokeColor] = useState(DEFAULT_STROKE_COLOR);
   const [fillColor, setFillColor] = useState(DEFAULT_FILL_COLOR);
   const [strokeWidth, setStrokeWidth] = useState(DEFAULT_STROKE_WIDTH);
-  const [pressureSimulation, setPressureSimulation] = useState(true);
+  const [pressureSimulation, setPressureSimulation] = useState(false);
   const [zoom, setZoom] = useState(1);
 
   // Undo/Redo state

@@ -5,9 +5,12 @@ import {
   CursorPointer,
   DesignPencil,
   DragHandGesture,
+  EditPencil,
   MediaImage,
-  Post,
+  PagePlus,
+  RedoAction,
   Text,
+  UndoAction,
 } from 'iconoir-react';
 import { useCanvas } from '@/components/canvas/CanvasProvider';
 import { DRAWING_COLORS } from '@/lib/constants/colors';
@@ -30,7 +33,6 @@ interface ToolbarButtonTool {
   id: ToolType;
   name: string;
   shortcut: string;
-  emoji: string;
   icon: React.ReactNode;
 }
 
@@ -43,14 +45,29 @@ interface PenModeOption {
 const SHAPE_GRID_COLUMNS = 4;
 const SHAPE_VISIBLE_ROWS = 2;
 const SHAPES_VISIBLE_COUNT = SHAPE_GRID_COLUMNS * SHAPE_VISIBLE_ROWS;
+const PEN_SIZE_OPTIONS = [2, 4, 6] as const;
 const ICON_STROKE_WIDTH = 2.05;
 
-function ToolIcon({ icon: Icon }: { icon: React.ComponentType<any> }) {
+type ToolbarIconProps = {
+  className?: string;
+  strokeWidth?: string | number;
+  'aria-hidden'?: React.AriaAttributes['aria-hidden'];
+};
+
+function ToolIcon({
+  icon: Icon,
+  className,
+  strokeWidth = ICON_STROKE_WIDTH,
+}: {
+  icon: React.ComponentType<ToolbarIconProps>;
+  className?: string;
+  strokeWidth?: number;
+}) {
   return (
     <Icon
-      className={`${styles.vectorIcon} ${styles.houseIcon}`}
-      strokeWidth={ICON_STROKE_WIDTH}
-      aria-hidden="true"
+      className={`${styles.vectorIcon} ${styles.houseIcon} ${className ?? ''}`}
+      strokeWidth={strokeWidth}
+      aria-hidden
     />
   );
 }
@@ -253,27 +270,7 @@ function GeometricShapesIcon() {
 }
 
 function InkPenIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className={styles.vectorIcon} aria-hidden="true">
-      <path
-        d="M5.8 18.6L13.6 10.8L16.8 14L9 21.8H5.8V18.6Z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M12.9 11.5L15.9 8.5C16.7 7.7 17.9 7.7 18.7 8.5C19.5 9.3 19.5 10.5 18.7 11.3L15.7 14.3"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path d="M4 22H10.6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
+  return <ToolIcon icon={EditPencil} />;
 }
 
 function BrushIcon() {
@@ -281,33 +278,11 @@ function BrushIcon() {
 }
 
 function UndoIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className={styles.zoomIcon} aria-hidden="true">
-      <path
-        d="M8.2 9.2V5.8L3.8 10.2L8.2 14.6V11.2H13.2C16.4 11.2 19 13.8 19 17"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
+  return <ToolIcon icon={UndoAction} className={styles.zoomIcon} strokeWidth={1.95} />;
 }
 
 function RedoIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className={styles.zoomIcon} aria-hidden="true">
-      <path
-        d="M15.8 9.2V5.8L20.2 10.2L15.8 14.6V11.2H10.8C7.6 11.2 5 13.8 5 17"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
+  return <ToolIcon icon={RedoAction} className={styles.zoomIcon} strokeWidth={1.95} />;
 }
 
 function ResetViewIcon() {
@@ -333,7 +308,7 @@ function ResetViewIcon() {
 }
 
 function StickyNoteIcon() {
-  return <ToolIcon icon={Post} />;
+  return <ToolIcon icon={PagePlus} />;
 }
 
 function TextToolIcon() {
@@ -415,22 +390,22 @@ export function Toolbar() {
   const penModes = useMemo<PenModeOption[]>(
     () => [
       {
-        id: 'ink',
-        name: 'Pressure On Pen',
-        icon: <InkPenIcon />,
+        id: 'brush',
+        name: 'Pen',
+        icon: <BrushIcon />,
       },
       {
-        id: 'brush',
-        name: 'Pressure Off',
-        icon: <BrushIcon />,
+        id: 'ink',
+        name: 'Ink Pen',
+        icon: <InkPenIcon />,
       },
     ],
     []
   );
 
   const utilityTools: ToolbarButtonTool[] = [
-    { id: 'text', name: 'Text', shortcut: 'T', emoji: '📝', icon: <TextToolIcon /> },
-    { id: 'image', name: 'Image', shortcut: 'I', emoji: '🖼️', icon: <ImageToolIcon /> },
+    { id: 'text', name: 'Text', shortcut: 'T', icon: <TextToolIcon /> },
+    { id: 'image', name: 'Image', shortcut: 'I', icon: <ImageToolIcon /> },
   ];
 
   const isShapeToolActive = isShapeToolType(activeTool);
@@ -511,6 +486,13 @@ export function Toolbar() {
     setShowProperties(true);
   };
 
+  const handlePenSizeSelect = (mode: PenMode, size: (typeof PEN_SIZE_OPTIONS)[number]) => {
+    setPressureSimulation(mode === 'ink');
+    setActiveTool('pen');
+    setStrokeWidth(size);
+    setShowProperties(true);
+  };
+
   const shouldShowStrokeWidth =
     activeTool === 'pen' || isShapeToolType(activeTool);
 
@@ -546,23 +528,26 @@ export function Toolbar() {
       {/* Left Sidebar Toolbar */}
       <div className={styles.toolbar}>
         <button
+          type="button"
           onClick={() => handleToolSelect('select')}
           className={`${styles.toolButton} ${activeTool === 'select' ? styles.active : ''}`}
-          data-tooltip="🖱️ Select (V)"
+          data-tooltip="Select (V)"
         >
           <CursorIcon />
         </button>
 
         <button
+          type="button"
           onClick={() => handleToolSelect('hand')}
           className={`${styles.toolButton} ${activeTool === 'hand' ? styles.active : ''}`}
-          data-tooltip="✋ Hand Tool (H)"
+          data-tooltip="Hand Tool (H)"
         >
           <HandGrabIcon />
         </button>
 
         <div className={styles.toolDropdown} ref={penDropdownRef}>
           <button
+            type="button"
             onClick={() => {
               if (activeTool === 'pen') {
                 setShowPenDropdown((prev) => !prev);
@@ -576,7 +561,7 @@ export function Toolbar() {
             className={`${styles.toolButton} ${styles.modeTrigger} ${
               activeTool === 'pen' ? styles.active : ''
             }`}
-            data-tooltip={`✍️ ${currentPenMode.name} (P)`}
+            data-tooltip={`${currentPenMode.name} (P)`}
             aria-label="Pen mode"
             aria-haspopup="menu"
             aria-expanded={showPenDropdown}
@@ -590,93 +575,102 @@ export function Toolbar() {
           {showPenDropdown && (
             <div className={styles.toolMenu} role="menu" aria-label="Pen modes">
               {penModes.map((mode) => (
-                <button
-                  key={mode.id}
-                  onClick={() => handlePenModeSelect(mode.id)}
-                  className={`${styles.toolMenuItem} ${
-                    currentPenMode.id === mode.id ? styles.toolMenuItemActive : ''
-                  }`}
-                  role="menuitem"
-                >
-                  <span className={styles.toolMenuIcon}>{mode.icon}</span>
-                  <span className={styles.toolMenuLabel}>{mode.name}</span>
-                </button>
+                <div key={mode.id} className={styles.penMenuRow}>
+                  <button
+                    type="button"
+                    onClick={() => handlePenModeSelect(mode.id)}
+                    className={`${styles.toolMenuItem} ${styles.penModeButton} ${
+                      currentPenMode.id === mode.id ? styles.toolMenuItemActive : ''
+                    }`}
+                    role="menuitem"
+                  >
+                    <span className={styles.toolMenuIcon}>{mode.icon}</span>
+                    <span className={styles.toolMenuLabel}>{mode.name}</span>
+                  </button>
+
+                  <div className={styles.penSizeDots} role="group" aria-label={`${mode.name} sizes`}>
+                    {PEN_SIZE_OPTIONS.map((size) => {
+                      const isActiveSize = currentPenMode.id === mode.id && strokeWidth === size;
+                      return (
+                        <button
+                          key={size}
+                          type="button"
+                          onClick={() => handlePenSizeSelect(mode.id, size)}
+                          className={`${styles.penSizeDot} ${isActiveSize ? styles.penSizeDotActive : ''}`}
+                          title={`${size}px`}
+                          aria-label={`${mode.name} ${size}px`}
+                        >
+                          <span
+                            className={`${styles.penSizeCore} ${size === 2 ? styles.penSizeCoreOutline : ''}`}
+                            style={{ width: `${size}px`, height: `${size}px` }}
+                            aria-hidden="true"
+                          />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               ))}
             </div>
           )}
         </div>
 
-        <button
-          onClick={() => handleToolSelect(activeTool === 'sticky' ? 'select' : 'sticky')}
-          className={`${styles.toolButton} ${activeTool === 'sticky' ? styles.active : ''}`}
-          data-tooltip="🗒️ Sticky Note (N)"
-        >
-          <StickyNoteIcon />
-        </button>
-
-        <div className={styles.divider} />
-
-        <div className={styles.toolDropdown} ref={shapesDropdownRef}>
           <button
-            onClick={() => {
-              setShowShapesDropdown((prev) => !prev);
-              setShowPenDropdown(false);
-            }}
-            className={`${styles.toolButton} ${styles.shapeTrigger} ${
-              isShapeToolActive ? styles.active : ''
-            }`}
-            data-tooltip={isShapeToolActive ? `🔷 Shapes: ${activeShape.name}` : '🔷 Shapes'}
-            aria-label="Shape tools"
-            aria-haspopup="menu"
-            aria-expanded={showShapesDropdown}
+            type="button"
+            onClick={() => handleToolSelect(activeTool === 'sticky' ? 'select' : 'sticky')}
+            className={`${styles.toolButton} ${activeTool === 'sticky' ? styles.active : ''}`}
+            data-tooltip="Sticky Note (N)"
           >
-            <GeometricShapesIcon />
-            <span className={`${styles.dropdownArrow} ${showShapesDropdown ? styles.open : ''}`}>
-              ▾
-            </span>
+            <StickyNoteIcon />
           </button>
 
-          {showShapesDropdown && (
-            <div className={styles.shapePanel} role="menu" aria-label="Shape tools">
-              <div className={styles.shapeConnectorRow}>
-                {connectorShapeTools.map((shapeTool) => (
-                  <button
-                    key={shapeTool.id}
-                    type="button"
-                    onClick={() => handleToolSelect(shapeTool.id)}
-                    className={`${styles.shapeIconButton} ${
-                      activeTool === shapeTool.id ? styles.shapeIconButtonActive : ''
-                    }`}
-                    title={shapeTool.shortcut ? `${shapeTool.name} (${shapeTool.shortcut})` : shapeTool.name}
-                    role="menuitem"
-                    aria-label={shapeTool.name}
-                  >
-                    {shapeTool.icon}
-                  </button>
-                ))}
-              </div>
+          <div className={styles.divider} />
 
-              <div className={styles.shapePanelDivider} />
+          <div className={styles.toolDropdown} ref={shapesDropdownRef}>
+            <button
+              type="button"
+              onClick={() => {
+                setShowShapesDropdown((prev) => !prev);
+                setShowPenDropdown(false);
+              }}
+              className={`${styles.toolButton} ${styles.shapeTrigger} ${
+                isShapeToolActive ? styles.active : ''
+              }`}
+              data-tooltip={isShapeToolActive ? `Shapes: ${activeShape.name}` : 'Shapes'}
+              aria-label="Shape tools"
+              aria-haspopup="menu"
+              aria-expanded={showShapesDropdown}
+            >
+              <GeometricShapesIcon />
+              <span className={`${styles.dropdownArrow} ${showShapesDropdown ? styles.open : ''}`}>
+                ▾
+              </span>
+            </button>
 
-              <div className={styles.shapeGrid}>
-                {visibleShapeTools.map((shapeTool) => (
-                  <button
-                    key={shapeTool.id}
-                    type="button"
-                    onClick={() => handleToolSelect(shapeTool.id)}
-                    className={`${styles.shapeTile} ${
-                      activeTool === shapeTool.id ? styles.shapeTileActive : ''
-                    }`}
-                    title={shapeTool.shortcut ? `${shapeTool.name} (${shapeTool.shortcut})` : shapeTool.name}
-                    role="menuitem"
-                    aria-label={shapeTool.name}
-                  >
-                    {shapeTool.icon}
-                  </button>
-                ))}
+            {showShapesDropdown && (
+              <div className={styles.shapePanel} role="menu" aria-label="Shape tools">
+                <div className={styles.shapeConnectorRow}>
+                  {connectorShapeTools.map((shapeTool) => (
+                    <button
+                      key={shapeTool.id}
+                      type="button"
+                      onClick={() => handleToolSelect(shapeTool.id)}
+                      className={`${styles.shapeIconButton} ${
+                        activeTool === shapeTool.id ? styles.shapeIconButtonActive : ''
+                      }`}
+                      title={shapeTool.shortcut ? `${shapeTool.name} (${shapeTool.shortcut})` : shapeTool.name}
+                      role="menuitem"
+                      aria-label={shapeTool.name}
+                    >
+                      {shapeTool.icon}
+                    </button>
+                  ))}
+                </div>
 
-                {showMoreShapes &&
-                  hiddenShapeTools.map((shapeTool) => (
+                <div className={styles.shapePanelDivider} />
+
+                <div className={styles.shapeGrid}>
+                  {visibleShapeTools.map((shapeTool) => (
                     <button
                       key={shapeTool.id}
                       type="button"
@@ -684,42 +678,60 @@ export function Toolbar() {
                       className={`${styles.shapeTile} ${
                         activeTool === shapeTool.id ? styles.shapeTileActive : ''
                       }`}
-                      title={shapeTool.name}
+                      title={shapeTool.shortcut ? `${shapeTool.name} (${shapeTool.shortcut})` : shapeTool.name}
                       role="menuitem"
                       aria-label={shapeTool.name}
                     >
                       {shapeTool.icon}
                     </button>
                   ))}
+
+                  {showMoreShapes &&
+                    hiddenShapeTools.map((shapeTool) => (
+                      <button
+                        key={shapeTool.id}
+                        type="button"
+                        onClick={() => handleToolSelect(shapeTool.id)}
+                        className={`${styles.shapeTile} ${
+                          activeTool === shapeTool.id ? styles.shapeTileActive : ''
+                        }`}
+                        title={shapeTool.name}
+                        role="menuitem"
+                        aria-label={shapeTool.name}
+                      >
+                        {shapeTool.icon}
+                      </button>
+                    ))}
+                </div>
+
+                {hiddenShapeTools.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowMoreShapes((prev) => !prev)}
+                    className={styles.moreShapesButton}
+                  >
+                    {showMoreShapes ? 'Less shapes' : 'More shapes'}
+                  </button>
+                )}
               </div>
+            )}
+          </div>
 
-              {hiddenShapeTools.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setShowMoreShapes((prev) => !prev)}
-                  className={styles.moreShapesButton}
-                >
-                  {showMoreShapes ? 'Less shapes' : 'More shapes'}
-                </button>
-              )}
-            </div>
-          )}
-        </div>
+          <div className={styles.divider} />
 
-        <div className={styles.divider} />
+          {utilityTools.map((tool) => (
+            <button
+              key={tool.id}
+              type="button"
+              onClick={() => handleToolSelect(tool.id)}
+              className={`${styles.toolButton} ${activeTool === tool.id ? styles.active : ''}`}
+              data-tooltip={`${tool.name} (${tool.shortcut})`}
+            >
+              {tool.icon}
+            </button>
+          ))}
 
-        {utilityTools.map((tool) => (
-          <button
-            key={tool.id}
-            onClick={() => handleToolSelect(tool.id)}
-            className={`${styles.toolButton} ${activeTool === tool.id ? styles.active : ''}`}
-            data-tooltip={`${tool.emoji} ${tool.name} (${tool.shortcut})`}
-          >
-            {tool.icon}
-          </button>
-        ))}
-
-        <div className={styles.divider} />
+          <div className={styles.divider} />
 
         {activeTool !== 'sticky' && (
           <div className={styles.colorTray} ref={colorTrayRef}>
@@ -727,6 +739,7 @@ export function Toolbar() {
               {visibleSidebarColors.map((color) => (
                 <button
                   key={color}
+                  type="button"
                   onClick={() => setStrokeColor(color)}
                   className={`${styles.sidebarColorButton} ${
                     strokeColor === color ? styles.sidebarColorActive : ''
@@ -739,6 +752,7 @@ export function Toolbar() {
 
             {overflowSidebarColors.length > 0 && (
               <button
+                type="button"
                 onClick={() => setShowAllSidebarColors((prev) => !prev)}
                 className={styles.sidebarColorToggle}
                 title={showAllSidebarColors ? 'Show fewer colors' : 'Show all colors'}
@@ -752,6 +766,7 @@ export function Toolbar() {
                 {overflowSidebarColors.map((color) => (
                   <button
                     key={color}
+                    type="button"
                     onClick={() => setStrokeColor(color)}
                     className={`${styles.colorPopoverButton} ${
                       strokeColor === color ? styles.colorPopoverButtonActive : ''
@@ -794,6 +809,7 @@ export function Toolbar() {
       {/* Zoom Controls (Bottom Right) */}
       <div className={styles.zoomControls}>
         <button
+          type="button"
           onClick={undo}
           className={`${styles.zoomButton} ${styles.zoomButtonCompact}`}
           title="Undo (Ctrl/Cmd + Z)"
@@ -803,6 +819,7 @@ export function Toolbar() {
           <UndoIcon />
         </button>
         <button
+          type="button"
           onClick={redo}
           className={`${styles.zoomButton} ${styles.zoomButtonCompact}`}
           title="Redo (Ctrl/Cmd + Y)"
@@ -813,6 +830,7 @@ export function Toolbar() {
         </button>
         <div className={styles.zoomDivider} />
         <button
+          type="button"
           onClick={handleZoomOut}
           className={styles.zoomButton}
           title="Zoom Out (Ctrl + -)"
@@ -821,6 +839,7 @@ export function Toolbar() {
         </button>
         <div className={styles.zoomDisplay}>{Math.round(zoom * 100)}%</div>
         <button
+          type="button"
           onClick={handleZoomIn}
           className={styles.zoomButton}
           title="Zoom In (Ctrl + +)"
@@ -828,6 +847,7 @@ export function Toolbar() {
           +
         </button>
         <button
+          type="button"
           onClick={handleResetZoom}
           className={styles.zoomButton}
           title="Reset Zoom (Ctrl + 0)"

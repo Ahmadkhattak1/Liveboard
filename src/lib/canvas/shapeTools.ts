@@ -40,6 +40,8 @@ export const CONNECTOR_SHAPE_TOOL_IDS: ShapeToolType[] = [
   'curvedArrow',
 ];
 
+export const DRAFT_SHAPE_FLAG = 'liveboardDraftShape';
+
 export function isShapeToolType(value: string): value is ShapeToolType {
   return SHAPE_TOOL_IDS.includes(value as ShapeToolType);
 }
@@ -494,7 +496,7 @@ export function createShapeForDrag(
       shape = new fabric.Polyline(buildElbowArrowPolylinePoints(start, start), {
         stroke,
         strokeWidth,
-        fill: undefined,
+        fill: 'transparent',
         strokeUniform: true,
         objectCaching: false,
       });
@@ -503,7 +505,7 @@ export function createShapeForDrag(
       shape = new fabric.Polyline(buildCurvedArrowPolylinePoints(start, start), {
         stroke,
         strokeWidth,
-        fill: undefined,
+        fill: 'transparent',
         strokeUniform: true,
         objectCaching: false,
       });
@@ -623,6 +625,7 @@ export function createShapeForDrag(
     selectable: false,
     evented: false,
   });
+  (shape as DrawableShape & { [DRAFT_SHAPE_FLAG]?: boolean })[DRAFT_SHAPE_FLAG] = true;
   canvas.add(shape);
 
   return shape;

@@ -4,12 +4,30 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { get, ref } from 'firebase/database';
-import { MouseEvent as ReactMouseEvent, useCallback, useEffect, useRef, useState } from 'react';
+import {
+  FormEvent as ReactFormEvent,
+  MouseEvent as ReactMouseEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState
+} from 'react';
 import { useAuth } from '@/components/providers/AuthProvider';
-import { createBoard, deleteBoardForUser, updateBoardEmoji } from '@/lib/firebase/database';
+import {
+  createBoard,
+  deleteBoardForUser,
+  findPublicBoardByShareCode,
+  updateBoardEmoji,
+  updateBoardSharing
+} from '@/lib/firebase/database';
 import { database } from '@/lib/firebase/config';
 import { loginAnonymously, loginWithGoogle } from '@/lib/firebase/auth';
 import { getRandomBoardEmoji } from '@/lib/constants/tools';
+import {
+  formatShareCode,
+  getBoardShareCodeStorageKey,
+  normalizeShareCode
+} from '@/lib/utils/shareCode';
 import { Loader } from '@/components/ui/Loader';
 import { Board } from '@/types/board';
 import styles from './page.module.css';
@@ -22,6 +40,8 @@ interface BoardSummary {
   title: string;
   emoji: string;
   updatedAt: number;
+  isPublic: boolean;
+  shareCode: string | null;
 }
 
 function normalizeBoardIds(value: unknown): string[] {
@@ -38,6 +58,15 @@ function normalizeBoardIds(value: unknown): string[] {
   }
 
   return [];
+}
+
+function resolveBoardShareCode(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = normalizeShareCode(value);
+  return normalized.length > 0 ? normalized : null;
 }
 
 function formatUpdatedTime(timestamp: number): string {
@@ -117,7 +146,7 @@ async function copyTextToClipboard(text: string): Promise<void> {
   document.body.removeChild(textarea);
 
   if (!copied) {
-    throw new Error('Unable to copy board link.');
+    throw new Error('Unable to copy text.');
   }
 }
 
@@ -125,25 +154,30 @@ export default function HomePage() {
   const router = useRouter();
   const { user, loading } = useAuth();
   const [boards, setBoards] = useState<BoardSummary[]>([]);
+  const [joinCodeInput, setJoinCodeInput] = useState('');
   const [activeUserId, setActiveUserId] = useState<string | null>(null);
   const [initializing, setInitializing] = useState(true);
   const [loadingBoards, setLoadingBoards] = useState(false);
   const [signingIn, setSigningIn] = useState(false);
   const [creatingBoard, setCreatingBoard] = useState(false);
+  const [joiningBoardByCode, setJoiningBoardByCode] = useState(false);
   const [emojiModalBoardId, setEmojiModalBoardId] = useState<string | null>(null);
   const [updatingEmojiBoardId, setUpdatingEmojiBoardId] = useState<string | null>(null);
+  const [shareModalBoardId, setShareModalBoardId] = useState<string | null>(null);
+  const [updatingShareBoardId, setUpdatingShareBoardId] = useState<string | null>(null);
+  const [copiedShareCodeBoardId, setCopiedShareCodeBoardId] = useState<string | null>(null);
   const [edgeActionBoardId, setEdgeActionBoardId] = useState<string | null>(null);
   const [deletingBoardId, setDeletingBoardId] = useState<string | null>(null);
-  const [copiedBoardId, setCopiedBoardId] = useState<string | null>(null);
   const [authAction, setAuthAction] = useState<'anonymous' | 'google' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const edgeRevealTimeoutRef = useRef<number | null>(null);
   const edgeRevealBoardRef = useRef<string | null>(null);
   const edgeHideTimeoutRef = useRef<number | null>(null);
   const edgeHideBoardRef = useRef<string | null>(null);
+  const hasModalOpen = Boolean(emojiModalBoardId || shareModalBoardId);
 
   useEffect(() => {
-    if (!emojiModalBoardId) {
+    if (!hasModalOpen) {
       return;
     }
 
@@ -153,17 +187,31 @@ export default function HomePage() {
     return () => {
       document.body.style.overflow = previousOverflow;
     };
-  }, [emojiModalBoardId]);
+  }, [hasModalOpen]);
 
   useEffect(() => {
-    if (!emojiModalBoardId) {
+    if (!hasModalOpen) {
       return;
     }
 
     const handleEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || updatingEmojiBoardId) {
+      if (event.key !== 'Escape') {
         return;
       }
+
+      if (updatingEmojiBoardId || updatingShareBoardId) {
+        return;
+      }
+
+      if (shareModalBoardId) {
+        setShareModalBoardId(null);
+        return;
+      }
+
+      if (!emojiModalBoardId) {
+        return;
+      }
+
       setEmojiModalBoardId(null);
     };
 
@@ -171,21 +219,21 @@ export default function HomePage() {
     return () => {
       window.removeEventListener('keydown', handleEscape);
     };
-  }, [emojiModalBoardId, updatingEmojiBoardId]);
+  }, [emojiModalBoardId, hasModalOpen, shareModalBoardId, updatingEmojiBoardId, updatingShareBoardId]);
 
   useEffect(() => {
-    if (!copiedBoardId) {
+    if (!copiedShareCodeBoardId) {
       return;
     }
 
     const timeout = window.setTimeout(() => {
-      setCopiedBoardId(null);
+      setCopiedShareCodeBoardId(null);
     }, 1400);
 
     return () => {
       window.clearTimeout(timeout);
     };
-  }, [copiedBoardId]);
+  }, [copiedShareCodeBoardId]);
 
   useEffect(() => {
     return () => {
@@ -241,6 +289,8 @@ export default function HomePage() {
             title: board.metadata.title?.trim() || 'Untitled Board',
             emoji,
             updatedAt: board.metadata.updatedAt || board.metadata.createdAt,
+            isPublic: Boolean(board.metadata.isPublic),
+            shareCode: resolveBoardShareCode(board.metadata.shareCode),
           };
         })
       );
@@ -336,6 +386,45 @@ export default function HomePage() {
     void loadBoards(activeUserId);
   };
 
+  const handleJoinBoardByCode = async (event: ReactFormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const normalizedCode = normalizeShareCode(joinCodeInput);
+    if (!normalizedCode) {
+      setError('Enter a valid share code.');
+      return;
+    }
+
+    if (joiningBoardByCode) {
+      return;
+    }
+
+    setJoiningBoardByCode(true);
+    setError(null);
+
+    try {
+      const boardId = await findPublicBoardByShareCode(normalizedCode);
+      if (!boardId) {
+        setError('No public board found for that share code.');
+        return;
+      }
+
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(
+          getBoardShareCodeStorageKey(boardId),
+          normalizedCode
+        );
+      }
+
+      router.push(`/${boardId}?code=${encodeURIComponent(normalizedCode)}`);
+    } catch (joinError: unknown) {
+      console.error('Error joining board by code:', joinError);
+      setError(parseErrorMessage(joinError, 'Failed to join board with share code'));
+    } finally {
+      setJoiningBoardByCode(false);
+    }
+  };
+
   const handleOpenEmojiModal = (
     boardId: string,
     event: ReactMouseEvent<HTMLButtonElement>
@@ -349,6 +438,81 @@ export default function HomePage() {
       return;
     }
     setEmojiModalBoardId(null);
+  };
+
+  const handleOpenShareModal = (
+    boardId: string,
+    event: ReactMouseEvent<HTMLButtonElement>
+  ) => {
+    event.stopPropagation();
+    setError(null);
+    setCopiedShareCodeBoardId(null);
+    setShareModalBoardId(boardId);
+  };
+
+  const handleCloseShareModal = () => {
+    if (updatingShareBoardId) {
+      return;
+    }
+
+    setShareModalBoardId(null);
+    setCopiedShareCodeBoardId(null);
+  };
+
+  const handleUpdateBoardSharing = async (
+    boardId: string,
+    nextPublicState: boolean
+  ) => {
+    if (!activeUserId || updatingShareBoardId) {
+      return;
+    }
+
+    setUpdatingShareBoardId(boardId);
+    setError(null);
+
+    try {
+      const sharingState = await updateBoardSharing(
+        boardId,
+        activeUserId,
+        nextPublicState
+      );
+
+      setBoards((currentBoards) =>
+        currentBoards.map((board) =>
+          board.id === boardId
+            ? {
+                ...board,
+                isPublic: sharingState.isPublic,
+                shareCode: sharingState.shareCode,
+              }
+            : board
+        )
+      );
+
+      if (!sharingState.shareCode) {
+        setCopiedShareCodeBoardId(null);
+      }
+    } catch (shareError: unknown) {
+      console.error('Error updating board sharing:', shareError);
+      setError(parseErrorMessage(shareError, 'Failed to update board sharing'));
+    } finally {
+      setUpdatingShareBoardId(null);
+    }
+  };
+
+  const handleCopyShareCode = async (
+    boardId: string,
+    shareCode: string
+  ) => {
+    setError(null);
+
+    try {
+      await copyTextToClipboard(shareCode);
+      setCopiedShareCodeBoardId(boardId);
+    } catch (copyError: unknown) {
+      console.error('Error copying share code:', copyError);
+      setError(parseErrorMessage(copyError, 'Failed to copy share code'));
+    }
   };
 
   const handleSelectBoardEmoji = async (
@@ -523,21 +687,11 @@ export default function HomePage() {
     setEdgeActionBoardId((current) => (current === boardId ? null : current));
   };
 
-  const handleShareBoard = async (
+  const handleShareBoard = (
     boardId: string,
     event: ReactMouseEvent<HTMLButtonElement>
   ) => {
-    event.stopPropagation();
-    setError(null);
-
-    try {
-      const boardUrl = `${window.location.origin}/${boardId}`;
-      await copyTextToClipboard(boardUrl);
-      setCopiedBoardId(boardId);
-    } catch (shareError: unknown) {
-      console.error('Error sharing board:', shareError);
-      setError(parseErrorMessage(shareError, 'Failed to copy board link'));
-    }
+    handleOpenShareModal(boardId, event);
   };
 
   const handleDeleteBoard = async (
@@ -568,8 +722,9 @@ export default function HomePage() {
         currentBoards.filter((board) => board.id !== boardId)
       );
       setEdgeActionBoardId((current) => (current === boardId ? null : current));
-      setCopiedBoardId((current) => (current === boardId ? null : current));
+      setCopiedShareCodeBoardId((current) => (current === boardId ? null : current));
       setEmojiModalBoardId((current) => (current === boardId ? null : current));
+      setShareModalBoardId((current) => (current === boardId ? null : current));
     } catch (deleteError: unknown) {
       console.error('Error deleting board:', deleteError);
       setError(parseErrorMessage(deleteError, 'Failed to delete board'));
@@ -581,6 +736,15 @@ export default function HomePage() {
   const emojiModalBoard = emojiModalBoardId
     ? boards.find((board) => board.id === emojiModalBoardId)
     : null;
+  const shareModalBoard = shareModalBoardId
+    ? boards.find((board) => board.id === shareModalBoardId)
+    : null;
+  const shareModalCode = shareModalBoard?.shareCode ?? null;
+  const shareModalCodeFormatted = shareModalCode ? formatShareCode(shareModalCode) : '';
+  const isShareCodeCopied =
+    Boolean(shareModalBoardId) && copiedShareCodeBoardId === shareModalBoardId;
+  const isUpdatingShareSettings =
+    Boolean(shareModalBoardId) && updatingShareBoardId === shareModalBoardId;
 
   const showInitialLoader =
     loading ||
@@ -670,6 +834,37 @@ export default function HomePage() {
           </div>
         )}
 
+        <section className={styles.joinPanel}>
+          <h2 className={styles.joinTitle}>Open a shared board</h2>
+          <p className={styles.joinText}>
+            Enter the access code from the board owner.
+          </p>
+          <form className={styles.joinForm} onSubmit={(event) => {
+            void handleJoinBoardByCode(event);
+          }}>
+            <input
+              type="text"
+              value={joinCodeInput}
+              onChange={(event) => {
+                setJoinCodeInput(normalizeShareCode(event.target.value));
+              }}
+              className={styles.joinInput}
+              placeholder="ABCD1234"
+              aria-label="Board access code"
+              maxLength={8}
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <button
+              type="submit"
+              className={styles.joinButton}
+              disabled={joiningBoardByCode || joinCodeInput.trim().length === 0}
+            >
+              {joiningBoardByCode ? 'Joining...' : 'Join board'}
+            </button>
+          </form>
+        </section>
+
         {boards.length === 0 ? (
           <section className={styles.emptyPanel}>
             <h2 className={styles.emptyTitle}>No boards yet</h2>
@@ -695,7 +890,6 @@ export default function HomePage() {
                   : styles.toneTeal;
               const isEdgeActionVisible = edgeActionBoardId === board.id;
               const isDeletingBoard = deletingBoardId === board.id;
-              const isShareCopied = copiedBoardId === board.id;
 
               return (
                 <div
@@ -744,12 +938,12 @@ export default function HomePage() {
                       type="button"
                       className={`${styles.edgeActionButton} ${styles.edgeActionShare}`}
                       onClick={(event) => {
-                        void handleShareBoard(board.id, event);
+                        handleShareBoard(board.id, event);
                       }}
-                      data-tooltip={isShareCopied ? 'Copied' : 'Share'}
+                      data-tooltip="Share"
                       aria-label={`Share ${board.title}`}
                     >
-                      {isShareCopied ? '✓' : '↗'}
+                      ↗
                     </button>
                     <button
                       type="button"
@@ -813,6 +1007,85 @@ export default function HomePage() {
               }}
               className={styles.emojiModalPicker}
             />
+          </div>
+        </div>
+      )}
+
+      {shareModalBoardId && shareModalBoard && (
+        <div className={styles.emojiModalBackdrop} onClick={handleCloseShareModal}>
+          <div
+            className={styles.shareModalCard}
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Share board"
+          >
+            <div className={styles.shareModalHeader}>
+              <div>
+                <h3 className={styles.shareModalTitle}>Share board</h3>
+                <p className={styles.shareModalSubtitle}>{shareModalBoard.title}</p>
+              </div>
+              <button
+                type="button"
+                className={styles.shareModalClose}
+                onClick={handleCloseShareModal}
+                disabled={isUpdatingShareSettings}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className={styles.shareModalBody}>
+              <p className={styles.shareModalText}>
+                Make this board public to generate an access code.
+              </p>
+
+              <button
+                type="button"
+                className={`${styles.shareVisibilityButton} ${shareModalBoard.isPublic ? styles.shareVisibilityPublic : styles.shareVisibilityPrivate}`}
+                onClick={() => {
+                  void handleUpdateBoardSharing(
+                    shareModalBoard.id,
+                    !shareModalBoard.isPublic
+                  );
+                }}
+                disabled={isUpdatingShareSettings}
+              >
+                {isUpdatingShareSettings
+                  ? 'Updating...'
+                  : shareModalBoard.isPublic
+                    ? 'Public (click to make private)'
+                    : 'Private (click to make public)'}
+              </button>
+
+              {shareModalBoard.isPublic && shareModalCode && (
+                <div className={styles.shareCodePanel}>
+                  <p className={styles.shareCodeLabel}>Access code</p>
+                  <div className={styles.shareCodeRow}>
+                    <code className={styles.shareCodeValue}>{shareModalCodeFormatted}</code>
+                    <button
+                      type="button"
+                      className={styles.shareCodeCopyButton}
+                      onClick={() => {
+                        void handleCopyShareCode(shareModalBoard.id, shareModalCode);
+                      }}
+                      disabled={isUpdatingShareSettings}
+                    >
+                      {isShareCodeCopied ? 'Copied' : 'Copy code'}
+                    </button>
+                  </div>
+                  <p className={styles.shareCodeHint}>
+                    The other user can enter this code on their dashboard to open this board.
+                  </p>
+                </div>
+              )}
+
+              {!shareModalBoard.isPublic && (
+                <p className={styles.sharePrivateHint}>
+                  This board is private and cannot be opened with a share code.
+                </p>
+              )}
+            </div>
           </div>
         </div>
       )}

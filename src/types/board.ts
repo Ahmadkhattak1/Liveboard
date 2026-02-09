@@ -6,6 +6,7 @@ export interface BoardMetadata {
   createdBy: string;
   updatedAt: number;
   isPublic: boolean;
+  shareCode?: string | null;
 }
 
 export interface SerializedCanvasState {

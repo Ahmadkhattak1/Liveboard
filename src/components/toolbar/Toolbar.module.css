@@ -1,64 +1,52 @@
-/* Floating left toolbar island */
 .toolbar {
   position: fixed;
-  left: max(16px, env(safe-area-inset-left));
+  left: max(14px, env(safe-area-inset-left));
   top: 50%;
   transform: translateY(-50%);
-  width: 70px;
-  max-height: calc(100vh - 48px);
-  background: #f8f8f9;
-  border: 1px solid #d5d8dd;
-  border-radius: 16px;
-  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.1), 0 2px 8px rgba(15, 23, 42, 0.06);
+  width: 64px;
+  max-height: calc(100vh - 44px);
+  background: #f7f8fa;
+  border: 1px solid #d8dde6;
+  border-radius: 14px;
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.09), 0 2px 7px rgba(15, 23, 42, 0.05);
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 14px 10px;
-  gap: 8px;
-  z-index: 100;
+  padding: 8px 7px;
+  gap: 4px;
   overflow: visible;
+  z-index: 140;
 }
 
-/* Tool buttons */
 .toolButton {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 48px;
-  height: 48px;
-  border: 1px solid #d3d7de;
-  border-radius: 14px;
-  background: #ffffff;
-  color: var(--text);
+  width: 42px;
+  height: 42px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: #1f2430;
   cursor: pointer;
-  transition: none;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
   position: relative;
 }
 
 .toolButton:hover {
-  background: #f2f6fb;
-  border-color: #c0c9d5;
+  background: #eceff5;
+  border-color: #d7dde8;
 }
 
 .toolButton.active {
-  background: #0b7db8;
-  border-color: #0b7db8;
-  color: #ffffff;
-  box-shadow: 0 8px 16px rgba(11, 125, 184, 0.28);
-}
-
-.toolButton.active .emoji {
-  filter: none;
-}
-
-.emoji {
-  font-size: 24px;
-  line-height: 1;
+  background: #e0e6f7;
+  border-color: #d2dbf5;
+  color: #2c59ec;
 }
 
 .vectorIcon {
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   color: currentColor;
 }
 
@@ -68,7 +56,7 @@
 }
 
 .toolButton.active .vectorIcon {
-  color: currentColor;
+  color: #2c59ec;
 }
 
 .toolDropdown {
@@ -85,12 +73,12 @@
 
 .dropdownArrow {
   position: absolute;
-  right: 5px;
-  bottom: 5px;
-  font-size: 10px;
+  right: 4px;
+  bottom: 4px;
+  font-size: 9px;
   line-height: 1;
-  color: var(--text-secondary);
-  transition: none;
+  color: #8b93a6;
+  transition: transform 120ms ease;
 }
 
 .open {
@@ -98,19 +86,19 @@
 }
 
 .toolButton.active .dropdownArrow {
-  color: rgba(255, 255, 255, 0.95);
+  color: #2c59ec;
 }
 
 .toolMenu {
   position: absolute;
   top: 0;
   left: calc(100% + 12px);
-  min-width: 196px;
+  min-width: 200px;
   padding: 8px;
-  border-radius: 18px;
-  border: 1px solid #d7dbe3;
-  background: #fbfcfe;
-  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.06);
+  border-radius: 14px;
+  border: 1px solid #d8dde6;
+  background: #ffffff;
+  box-shadow: 0 20px 36px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.06);
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -122,39 +110,85 @@
   grid-template-columns: 24px 1fr;
   align-items: center;
   gap: 10px;
-  padding: 8px 10px;
+  padding: 9px 11px;
   border: 1px solid transparent;
-  border-radius: 12px;
+  border-radius: 9px;
   background: transparent;
-  color: var(--text);
+  color: #1f2430;
   cursor: pointer;
-  transition: none;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
   text-align: left;
 }
 
+.penMenuRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.penModeButton {
+  width: 100%;
+}
+
+.penSizeDots {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding-right: 1px;
+}
+
+.penSizeDot {
+  width: 18px;
+  height: 18px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: #1f2430;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.penSizeDot:hover {
+  background: #edf1fa;
+  border-color: #dbe2f0;
+}
+
+.penSizeDotActive {
+  background: #e3e9ff;
+  border-color: #d2dbff;
+  color: #2c59ec;
+}
+
+.penSizeCore {
+  display: block;
+  border-radius: 999px;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+
+.penSizeCoreOutline {
+  box-shadow: 0 0 0 1px currentColor;
+}
+
 .toolMenuItem:hover {
-  background: #f1f6fb;
-  border-color: #d3dbe6;
+  background: #edf1fa;
+  border-color: #dbe2f0;
 }
 
 .toolMenuItemActive {
-  background: #0b7db8;
-  border-color: #0b7db8;
-  color: #ffffff;
+  background: #e3e9ff;
+  border-color: #d2dbff;
+  color: #2c59ec;
 }
 
 .toolMenuItemActive:hover {
-  background: #0b7db8;
-  border-color: #0b7db8;
-  color: #ffffff;
-}
-
-.toolMenuItemActive .toolMenuIcon {
-  color: #ffffff;
-}
-
-.toolMenuItemActive .toolMenuLabel {
-  color: #ffffff;
+  background: #e3e9ff;
+  border-color: #d2dbff;
+  color: #2c59ec;
 }
 
 .toolMenuIcon {
@@ -165,40 +199,35 @@
 }
 
 .toolMenuIcon .vectorIcon {
-  width: 18px;
-  height: 18px;
+  width: 19px;
+  height: 19px;
   color: currentColor;
 }
 
 .toolMenuLabel {
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .toolMenuMeta {
   font-size: 11px;
   letter-spacing: 0.4px;
-  color: var(--text-secondary);
+  color: #7a8397;
   font-family: monospace;
   text-transform: uppercase;
   white-space: nowrap;
-}
-
-.toolMenuItemActive .toolMenuMeta {
-  color: #ffffff;
-  opacity: 0.85;
 }
 
 .shapePanel {
   position: absolute;
   top: 0;
   left: calc(100% + 12px);
-  width: 300px;
+  width: 296px;
   padding: 14px;
-  border-radius: 18px;
-  border: 1px solid #d7dbe3;
-  background: #fbfcfe;
-  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.06);
+  border-radius: 14px;
+  border: 1px solid #d8dde6;
+  background: #ffffff;
+  box-shadow: 0 20px 36px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.06);
   z-index: 265;
 }
 
@@ -211,34 +240,34 @@
 .shapeIconButton {
   height: 44px;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: 9px;
   background: transparent;
-  color: var(--text);
+  color: #1f2430;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: none;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 
 .shapeIconButton:hover {
-  background: #f1f6fb;
-  border-color: #d3dbe6;
+  background: #edf1fa;
+  border-color: #dbe2f0;
 }
 
 .shapeIconButtonActive {
-  background: #0b7db8;
-  border-color: #0b7db8;
-  color: #ffffff;
+  background: #e3e9ff;
+  border-color: #d2dbff;
+  color: #2c59ec;
 }
 
 .shapeIconButtonActive .vectorIcon {
-  color: #ffffff;
+  color: #2c59ec;
 }
 
 .shapePanelDivider {
   height: 1px;
-  background: #e2e6ee;
+  background: #e3e7ef;
   margin: 12px 0;
 }
 
@@ -251,29 +280,29 @@
 .shapeTile {
   height: 54px;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: 9px;
   background: transparent;
-  color: var(--text);
+  color: #1f2430;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: none;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 
 .shapeTile:hover {
-  background: #f1f6fb;
-  border-color: #d3dbe6;
+  background: #edf1fa;
+  border-color: #dbe2f0;
 }
 
 .shapeTileActive {
-  background: #0b7db8;
-  border-color: #0b7db8;
-  color: #ffffff;
+  background: #e3e9ff;
+  border-color: #d2dbff;
+  color: #2c59ec;
 }
 
 .shapeTileActive .vectorIcon {
-  color: #ffffff;
+  color: #2c59ec;
 }
 
 .shapeTile .vectorIcon,
@@ -285,26 +314,24 @@
 .moreShapesButton {
   margin-top: 10px;
   width: 100%;
-  height: 34px;
-  border: 1px solid #ced5df;
-  border-radius: 12px;
-  background: #ffffff;
-  color: #394150;
+  height: 36px;
+  border: 1px solid #d0d8e5;
+  border-radius: 9px;
+  background: #f8fafe;
+  color: #3c465b;
   font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.3px;
   text-transform: uppercase;
   cursor: pointer;
-  transition: none;
+  transition: border-color 120ms ease, color 120ms ease;
 }
 
 .moreShapesButton:hover {
-  border-color: #0b7db8;
-  background: #eef6fd;
-  color: #0b7db8;
+  border-color: #2c59ec;
+  color: #2c59ec;
 }
 
-/* Tooltip on hover */
 .toolButton::after {
   content: attr(data-tooltip);
   position: absolute;
@@ -313,96 +340,98 @@
   padding: 8px 14px;
   background: #ffffff;
   color: #0f172a;
-  border: 1px solid #d4d9e0;
+  border: 1px solid #d4dae5;
   border-radius: 999px;
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
   opacity: 0;
   pointer-events: none;
-  transition: none;
+  transition: opacity 120ms ease;
 }
 
 .toolButton:hover::after {
   opacity: 1;
 }
 
-.modeTrigger[aria-expanded='true']::after {
-  opacity: 0;
-}
-
+.modeTrigger[aria-expanded='true']::after,
 .shapeTrigger[aria-expanded='true']::after {
   opacity: 0;
 }
 
-/* Divider */
 .divider {
-  width: 78%;
+  width: 28px;
   height: 1px;
-  background: #dde3ea;
-  opacity: 1;
-  margin: 8px 0;
+  background: #d9dee8;
+  margin: 5px 0;
 }
 
 .colorTray {
   position: relative;
-  width: 44px;
+  width: 42px;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
 .sidebarColors {
-  width: 44px;
+  width: 42px;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
 
 .sidebarColorButton {
-  width: 19px;
-  height: 19px;
-  border: 1.5px solid #cdd4de;
-  border-radius: 6px;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid #cfd6e3;
+  border-radius: 5px;
   cursor: pointer;
-  transition: none;
+  transition: transform 120ms ease;
+}
+
+.sidebarColorButton:hover {
+  transform: translateY(-1px);
 }
 
 .sidebarColorActive {
-  box-shadow: 0 0 0 2px #f8f8f9, 0 0 0 3px #0b7db8;
+  box-shadow: 0 0 0 2px #f7f8fa, 0 0 0 4px #2c59ec;
 }
 
 .sidebarColorToggle {
-  grid-column: 1 / -1;
+  width: 30px;
   height: 24px;
-  border: 1px solid #ced5df;
-  border-radius: 999px;
-  background: #ffffff;
-  color: var(--text-secondary);
+  margin: 0 auto;
+  border: 1px solid #1f2430;
+  border-radius: 7px;
+  background: #1f2430;
+  color: #ffffff;
   cursor: pointer;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 18px;
+  font-weight: 500;
   line-height: 1;
-  transition: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 120ms ease, transform 120ms ease;
 }
 
 .sidebarColorToggle:hover {
-  color: #0b7db8;
-  border-color: #0b7db8;
-  background: #eef6fd;
+  background: #11161f;
+  transform: translateY(-1px);
 }
 
 .colorPopover {
   position: absolute;
   left: calc(100% + 12px);
   bottom: 0;
-  width: 116px;
+  width: 114px;
   padding: 8px;
-  border-radius: 12px;
-  border: 1px solid #d7dbe3;
-  background: #fbfcfe;
-  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.06);
+  border-radius: 10px;
+  border: 1px solid #d8dde6;
+  background: #ffffff;
+  box-shadow: 0 20px 36px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.06);
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
@@ -412,24 +441,22 @@
 .colorPopoverButton {
   width: 100%;
   aspect-ratio: 1;
-  border: 1.5px solid #cdd4de;
-  border-radius: 7px;
+  border: 1.5px solid #cfd6e3;
+  border-radius: 6px;
   cursor: pointer;
-  transition: none;
 }
 
 .colorPopoverButtonActive {
-  box-shadow: 0 0 0 2px #fbfcfe, 0 0 0 3px #0b7db8;
+  box-shadow: 0 0 0 2px #ffffff, 0 0 0 3px #2c59ec;
 }
 
-/* Properties panel (floating) */
 .propertiesPanel {
   position: fixed;
   bottom: 24px;
-  left: 104px;
-  background: #fbfcfe;
-  border: 1px solid #d7dbe3;
-  border-radius: 16px;
+  left: 90px;
+  background: #ffffff;
+  border: 1px solid #d8dde6;
+  border-radius: 12px;
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -479,7 +506,6 @@
   cursor: pointer;
 }
 
-/* Stroke width slider */
 .sliderContainer {
   display: flex;
   flex-direction: column;
@@ -513,7 +539,7 @@
   background: var(--text);
   cursor: pointer;
   border: 3px solid var(--bg);
-  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .slider::-moz-range-thumb {
@@ -523,42 +549,42 @@
   background: var(--text);
   cursor: pointer;
   border: 3px solid var(--bg);
-  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
-/* Zoom controls (bottom right like Miro) */
 .zoomControls {
   position: fixed;
   right: max(16px, env(safe-area-inset-right));
   bottom: max(16px, env(safe-area-inset-bottom));
   display: flex;
-  gap: 6px;
-  background: #fbfcfe;
-  border: 1px solid #d7dbe3;
-  border-radius: 16px;
-  padding: 6px;
-  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.06);
+  gap: 4px;
+  background: #ffffff;
+  border: 1px solid #d8dde6;
+  border-radius: 12px;
+  padding: 5px;
+  box-shadow: 0 18px 34px rgba(15, 23, 42, 0.1), 0 2px 8px rgba(15, 23, 42, 0.06);
   z-index: 220;
-  isolation: isolate;
-  pointer-events: auto;
-  transform: translateZ(0);
-  will-change: transform;
 }
 
 .zoomButton {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
-  border: none;
-  border-radius: var(--radius-md);
+  width: 32px;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 8px;
   background: transparent;
   font-size: 17px;
   font-weight: 500;
   cursor: pointer;
-  transition: all var(--transition);
-  color: var(--text);
+  color: #1f2430;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.zoomIcon {
+  width: 16px;
+  height: 16px;
 }
 
 .zoomButtonCompact {
@@ -566,13 +592,15 @@
   height: 30px;
 }
 
-.zoomIcon {
-  width: 15px;
-  height: 15px;
+.zoomDivider {
+  width: 1px;
+  background: #d9dee8;
+  margin: 2px 1px;
 }
 
 .zoomButton:hover {
-  background: var(--bg-secondary);
+  background: #eceff5;
+  border-color: #d7dde8;
 }
 
 .zoomButton:disabled {
@@ -582,95 +610,114 @@
 
 .zoomButton:disabled:hover {
   background: transparent;
-}
-
-.zoomDivider {
-  width: 1px;
-  background: #dbe1e9;
-  opacity: 1;
-  margin: 2px 1px;
+  border-color: transparent;
 }
 
 .zoomDisplay {
-  min-width: 60px;
+  min-width: 52px;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 13px;
-  font-weight: 500;
-  color: var(--text);
+  font-weight: 600;
+  color: #1f2430;
   font-family: monospace;
 }
 
-/* Mobile hide */
 @media (max-width: 768px) {
   .toolbar {
     left: max(8px, env(safe-area-inset-left));
-    width: 60px;
-    max-height: calc(100vh - 24px);
-    padding: 10px 6px;
-    border-radius: 14px;
-    box-shadow: 0 14px 26px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.07);
+    width: 56px;
+    border-radius: 12px;
+    padding: 7px 6px;
   }
 
   .toolButton {
-    width: 40px;
-    height: 40px;
-  }
-
-  .emoji {
-    font-size: 20px;
+    width: 38px;
+    height: 38px;
+    border-radius: 8px;
   }
 
   .vectorIcon {
-    width: 20px;
-    height: 20px;
+    width: 18px;
+    height: 18px;
   }
 
-  .propertiesPanel {
-    left: 84px;
-    min-width: 200px;
+  .divider {
+    width: 24px;
   }
 
-  .toolMenu {
-    left: calc(100% + 8px);
-    min-width: 180px;
-  }
-
-  .shapePanel {
-    left: calc(100% + 8px);
-    width: 280px;
-    padding: 12px;
-  }
-
-  .shapeTile {
-    height: 48px;
-  }
-
-  .moreShapesButton {
-    height: 32px;
-    font-size: 11px;
-  }
-
-  .sidebarColors {
-    width: 40px;
+  .sidebarColors,
+  .colorTray {
+    width: 38px;
     gap: 5px;
   }
 
   .sidebarColorButton {
-    width: 17px;
-    height: 17px;
+    width: 16px;
+    height: 16px;
   }
 
-  .colorTray {
-    width: 40px;
-    gap: 5px;
+  .sidebarColorToggle {
+    width: 28px;
+    height: 22px;
+    font-size: 16px;
+  }
+
+  .toolButton::after {
+    display: none;
+  }
+
+  .propertiesPanel {
+    left: 74px;
+    min-width: 190px;
+  }
+
+  .toolMenu {
+    left: calc(100% + 8px);
+    min-width: 176px;
+  }
+
+  .shapePanel {
+    left: calc(100% + 8px);
+    width: 266px;
+    padding: 12px;
+  }
+
+  .shapeTile {
+    height: 44px;
+  }
+
+  .moreShapesButton {
+    height: 30px;
+    font-size: 11px;
   }
 
   .colorPopover {
     left: calc(100% + 8px);
-    width: 104px;
+    width: 100px;
     gap: 5px;
     padding: 7px;
+  }
+
+  .zoomControls {
+    right: max(10px, env(safe-area-inset-right));
+    bottom: max(10px, env(safe-area-inset-bottom));
+    border-radius: 10px;
+  }
+
+  .zoomButton {
+    width: 28px;
+    height: 28px;
+  }
+
+  .zoomButtonCompact {
+    width: 26px;
+    height: 26px;
+  }
+
+  .zoomDisplay {
+    min-width: 46px;
+    font-size: 11px;
   }
 }

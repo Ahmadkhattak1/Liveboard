@@ -20,8 +20,23 @@ import {
   SerializedCanvasState,
   UserPresence,
 } from '@/types/board';
-import { generateBoardId } from '@/lib/utils/generateId';
+import { generateBoardId, generateShareCode } from '@/lib/utils/generateId';
 import { getRandomBoardEmoji } from '@/lib/constants/tools';
+import { normalizeShareCode } from '@/lib/utils/shareCode';
+
+interface BoardShareSettings {
+  isPublic: boolean;
+  shareCode: string | null;
+}
+
+function resolveBoardShareCode(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalizedCode = normalizeShareCode(value);
+  return normalizedCode.length > 0 ? normalizedCode : null;
+}
 
 function normalizeBoardIds(value: unknown): string[] {
   if (Array.isArray(value)) {
@@ -120,12 +135,13 @@ export async function createBoard(userId: string, title?: string): Promise<strin
       createdAt: Date.now(),
       createdBy: userId,
       updatedAt: Date.now(),
-      isPublic: true,
+      isPublic: false,
+      shareCode: null,
     },
     canvas: {
       version: '6.0.0',
       objects: [],
-      background: '#ffffff',
+      background: 'transparent',
     },
     presence: {},
   };
@@ -141,6 +157,148 @@ export async function createBoard(userId: string, title?: string): Promise<strin
   return boardId;
 }
 
+async function getOwnedBoard(boardId: string, ownerUserId: string): Promise<Board> {
+  const boardRef = ref(database, `boards/${boardId}`);
+  const boardSnapshot = await get(boardRef);
+
+  if (!boardSnapshot.exists()) {
+    throw new Error('Board not found.');
+  }
+
+  const board = boardSnapshot.val() as Board;
+  if (board.metadata.createdBy !== ownerUserId) {
+    throw new Error('Only the board owner can manage sharing for this board.');
+  }
+
+  return board;
+}
+
+async function resolveAvailableShareCode(
+  boardId: string,
+  preferredCode: string | null
+): Promise<string> {
+  const preferredNormalized = resolveBoardShareCode(preferredCode);
+
+  if (preferredNormalized) {
+    const preferredRef = ref(database, `shareCodes/${preferredNormalized}`);
+    const preferredSnapshot = await get(preferredRef);
+    if (!preferredSnapshot.exists() || preferredSnapshot.val() === boardId) {
+      return preferredNormalized;
+    }
+  }
+
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const candidateCode = generateShareCode();
+    const candidateRef = ref(database, `shareCodes/${candidateCode}`);
+    const candidateSnapshot = await get(candidateRef);
+    if (!candidateSnapshot.exists() || candidateSnapshot.val() === boardId) {
+      return candidateCode;
+    }
+  }
+
+  throw new Error('Unable to generate a unique share code. Please try again.');
+}
+
+export async function updateBoardSharing(
+  boardId: string,
+  ownerUserId: string,
+  isPublic: boolean
+): Promise<BoardShareSettings> {
+  const board = await getOwnedBoard(boardId, ownerUserId);
+  const rootRef = ref(database);
+  const now = Date.now();
+  const existingCode = resolveBoardShareCode(board.metadata.shareCode);
+
+  if (!isPublic) {
+    const updates: Record<string, unknown> = {
+      [`boards/${boardId}/metadata/isPublic`]: false,
+      [`boards/${boardId}/metadata/shareCode`]: null,
+      [`boards/${boardId}/metadata/updatedAt`]: now,
+    };
+    if (existingCode) {
+      updates[`shareCodes/${existingCode}`] = null;
+    }
+
+    await update(rootRef, updates);
+
+    return {
+      isPublic: false,
+      shareCode: null,
+    };
+  }
+
+  const shareCode = await resolveAvailableShareCode(boardId, existingCode);
+  const updates: Record<string, unknown> = {
+    [`boards/${boardId}/metadata/isPublic`]: true,
+    [`boards/${boardId}/metadata/shareCode`]: shareCode,
+    [`boards/${boardId}/metadata/updatedAt`]: now,
+    [`shareCodes/${shareCode}`]: boardId,
+  };
+  if (existingCode && existingCode !== shareCode) {
+    updates[`shareCodes/${existingCode}`] = null;
+  }
+
+  await update(rootRef, updates);
+
+  return {
+    isPublic: true,
+    shareCode,
+  };
+}
+
+export async function findPublicBoardByShareCode(code: string): Promise<string | null> {
+  const normalizedCode = normalizeShareCode(code);
+  if (!normalizedCode) {
+    return null;
+  }
+
+  const lookupRef = ref(database, `shareCodes/${normalizedCode}`);
+  const lookupSnapshot = await get(lookupRef);
+  if (!lookupSnapshot.exists()) {
+    const boardsRef = ref(database, 'boards');
+    const boardsSnapshot = await get(boardsRef);
+    if (!boardsSnapshot.exists()) {
+      return null;
+    }
+
+    const boards = boardsSnapshot.val() as Record<string, Board | undefined>;
+    const backfillMatch = Object.entries(boards).find(([, board]) => {
+      if (!board) {
+        return false;
+      }
+
+      const boardShareCode = resolveBoardShareCode(board.metadata.shareCode);
+      return board.metadata.isPublic && boardShareCode === normalizedCode;
+    });
+
+    if (!backfillMatch) {
+      return null;
+    }
+
+    const [backfilledBoardId] = backfillMatch;
+    await set(lookupRef, backfilledBoardId);
+    return backfilledBoardId;
+  }
+
+  const boardId = lookupSnapshot.val();
+  if (typeof boardId !== 'string' || boardId.length === 0) {
+    return null;
+  }
+
+  const board = await getBoard(boardId);
+  if (!board) {
+    await remove(lookupRef);
+    return null;
+  }
+
+  const boardShareCode = resolveBoardShareCode(board.metadata.shareCode);
+  if (!board.metadata.isPublic || boardShareCode !== normalizedCode) {
+    return null;
+  }
+
+  return boardId;
+}
+
 export async function deleteBoardForUser(
   userId: string,
   boardId: string
@@ -152,6 +310,12 @@ export async function deleteBoardForUser(
     const board = boardSnapshot.val() as Board;
     if (board.metadata.createdBy !== userId) {
       throw new Error('Only the board owner can delete this board.');
+    }
+
+    const shareCode = resolveBoardShareCode(board.metadata.shareCode);
+    if (shareCode) {
+      const shareCodeRef = ref(database, `shareCodes/${shareCode}`);
+      await remove(shareCodeRef);
     }
   }
 
@@ -230,7 +394,7 @@ export function subscribeToBoardCanvas(
       callback({
         version: '6.0.0',
         objects: [],
-        background: '#ffffff',
+        background: 'transparent',
       });
       return;
     }
@@ -407,11 +571,52 @@ export function subscribeToPresence(
   callback: (presence: Record<string, UserPresence>) => void
 ): () => void {
   const presenceRef = ref(database, `boards/${boardId}/presence`);
-  return onValue(presenceRef, (snapshot) => {
-    if (snapshot.exists()) {
-      callback(normalizePresenceMap(snapshot.val()));
-    } else {
-      callback({});
+  const presenceByUser: Record<string, UserPresence> = {};
+
+  const emitPresence = () => {
+    callback({ ...presenceByUser });
+  };
+
+  const upsertPresence = (userId: string, rawPresence: unknown) => {
+    const normalized = normalizePresenceMap({ [userId]: rawPresence });
+    const nextPresence = normalized[userId];
+    if (!nextPresence) {
+      return;
     }
+    presenceByUser[userId] = nextPresence;
+    emitPresence();
+  };
+
+  callback({});
+
+  const addedUnsubscribe = onChildAdded(presenceRef, (snapshot) => {
+    const userId = snapshot.key;
+    if (!userId) {
+      return;
+    }
+    upsertPresence(userId, snapshot.val());
   });
+
+  const changedUnsubscribe = onChildChanged(presenceRef, (snapshot) => {
+    const userId = snapshot.key;
+    if (!userId) {
+      return;
+    }
+    upsertPresence(userId, snapshot.val());
+  });
+
+  const removedUnsubscribe = onChildRemoved(presenceRef, (snapshot) => {
+    const userId = snapshot.key;
+    if (!userId || !(userId in presenceByUser)) {
+      return;
+    }
+    delete presenceByUser[userId];
+    emitPresence();
+  });
+
+  return () => {
+    addedUnsubscribe();
+    changedUnsubscribe();
+    removedUnsubscribe();
+  };
 }

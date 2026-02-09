@@ -31,6 +31,9 @@ const CONNECTOR_HANDLE_TOUCH_SIZE = 30;
 const CONNECTOR_HEAD_SIZE = 14;
 const CONNECTOR_CURVE_SEGMENTS = 20;
 const CONNECTOR_POINT_TOLERANCE = 0.5;
+const CONNECTOR_DATA_TOLERANCE = 0.75;
+const CONNECTOR_CURVE_POINT_COUNT = CONNECTOR_CURVE_SEGMENTS + 1;
+const CONNECTOR_ARROW_POINT_COUNT = CONNECTOR_CURVE_SEGMENTS + 4;
 
 const PERSISTED_METADATA_KEYS = [
   'id',
@@ -74,14 +77,23 @@ function pointsRoughlyEqual(a: ConnectorPoint, b: ConnectorPoint): boolean {
     Math.abs(a.y - b.y) <= CONNECTOR_POINT_TOLERANCE;
 }
 
+function connectorPointsRoughlyEqual(a: ConnectorPoint, b: ConnectorPoint): boolean {
+  return Math.abs(a.x - b.x) <= CONNECTOR_DATA_TOLERANCE &&
+    Math.abs(a.y - b.y) <= CONNECTOR_DATA_TOLERANCE;
+}
+
+function connectorDataRoughlyEqual(a: ConnectorData, b: ConnectorData): boolean {
+  return a.kind === b.kind &&
+    connectorPointsRoughlyEqual(a.start, b.start) &&
+    connectorPointsRoughlyEqual(a.end, b.end) &&
+    connectorPointsRoughlyEqual(a.control, b.control);
+}
+
 function toScenePointFromPolylinePoint(
   polyline: fabric.Polyline,
   point: ConnectorPoint
 ): ConnectorPoint {
-  const matrix = fabric.util.multiplyTransformMatrices(
-    polyline.getViewportTransform(),
-    polyline.calcTransformMatrix()
-  );
+  const matrix = polyline.calcTransformMatrix();
   const pathOffset = polyline.pathOffset ?? new fabric.Point(0, 0);
 
   return toConnectorPoint(
@@ -89,16 +101,64 @@ function toScenePointFromPolylinePoint(
   );
 }
 
-function inferStraightConnectorDataFromPolyline(polyline: fabric.Polyline): ConnectorData | null {
-  const points = (polyline.points ?? [])
+function getFinitePolylinePoints(polyline: fabric.Polyline): ConnectorPoint[] {
+  return (polyline.points ?? [])
     .map((point) => ({
       x: Number(point.x),
       y: Number(point.y),
     }))
     .filter((point) => isFiniteNumber(point.x) && isFiniteNumber(point.y));
+}
+
+function inferConnectorControlFromMidpoint(
+  start: ConnectorPoint,
+  midpointOnCurve: ConnectorPoint,
+  end: ConnectorPoint
+): ConnectorPoint {
+  return {
+    x: midpointOnCurve.x * 2 - (start.x + end.x) / 2,
+    y: midpointOnCurve.y * 2 - (start.y + end.y) / 2,
+  };
+}
+
+function inferCurrentConnectorDataFromPolylinePoints(
+  polyline: fabric.Polyline,
+  points: ConnectorPoint[]
+): ConnectorData | null {
+  const looksLikeCurrentLine = points.length === CONNECTOR_CURVE_POINT_COUNT;
+  const looksLikeCurrentArrow = points.length === CONNECTOR_ARROW_POINT_COUNT &&
+    pointsRoughlyEqual(points[CONNECTOR_CURVE_SEGMENTS], points[CONNECTOR_CURVE_SEGMENTS + 2]);
+
+  if (!looksLikeCurrentLine && !looksLikeCurrentArrow) {
+    return null;
+  }
+
+  const start = toScenePointFromPolylinePoint(polyline, points[0]);
+  const end = toScenePointFromPolylinePoint(polyline, points[CONNECTOR_CURVE_SEGMENTS]);
+  const midpointOnCurve = toScenePointFromPolylinePoint(
+    polyline,
+    points[Math.floor(CONNECTOR_CURVE_SEGMENTS / 2)]
+  );
+  const control = inferConnectorControlFromMidpoint(start, midpointOnCurve, end);
+
+  return {
+    kind: looksLikeCurrentArrow ? 'arrow' : 'line',
+    start,
+    end,
+    control,
+  };
+}
+
+function inferStraightConnectorDataFromPolyline(polyline: fabric.Polyline): ConnectorData | null {
+  const points = getFinitePolylinePoints(polyline);
 
   if (points.length < 2) {
     return null;
+  }
+
+  const currentConnectorData = inferCurrentConnectorDataFromPolylinePoints(polyline, points);
+  if (currentConnectorData) {
+    return currentConnectorData;
   }
 
   const looksLikeLegacyArrow = points.length >= 5 && pointsRoughlyEqual(points[1], points[3]);
@@ -121,10 +181,7 @@ function inferStraightConnectorDataFromPolyline(polyline: fabric.Polyline): Conn
 
 function inferStraightConnectorDataFromLine(line: fabric.Line): ConnectorData {
   const { x1, y1, x2, y2 } = line.calcLinePoints();
-  const matrix = fabric.util.multiplyTransformMatrices(
-    line.getViewportTransform(),
-    line.calcTransformMatrix()
-  );
+  const matrix = line.calcTransformMatrix();
   const start = toConnectorPoint(new fabric.Point(x1, y1).transform(matrix));
   const end = toConnectorPoint(new fabric.Point(x2, y2).transform(matrix));
 
@@ -177,12 +234,30 @@ function readConnectorData(object: fabric.Object): ConnectorData | null {
 
 function getConnectorData(object: fabric.Object): ConnectorData | null {
   const storedData = readConnectorData(object);
-  if (storedData) {
-    return storedData;
-  }
 
   if (object instanceof fabric.Polyline) {
+    const points = getFinitePolylinePoints(object);
+    const inferredCurrent = inferCurrentConnectorDataFromPolylinePoints(object, points);
+
+    if (storedData && inferredCurrent) {
+      return connectorDataRoughlyEqual(storedData, inferredCurrent)
+        ? storedData
+        : inferredCurrent;
+    }
+
+    if (storedData) {
+      return storedData;
+    }
+
+    if (inferredCurrent) {
+      return inferredCurrent;
+    }
+
     return inferStraightConnectorDataFromPolyline(object);
+  }
+
+  if (storedData) {
+    return storedData;
   }
 
   if (object instanceof fabric.Line) {
@@ -422,8 +497,15 @@ export function isConnectorObject(object: fabric.Object | null | undefined): obj
 export function applyConnectorGeometry(connector: fabric.Polyline, data: ConnectorData): void {
   writeConnectorData(connector, data);
   connector.set({
+    scaleX: 1,
+    scaleY: 1,
+    angle: 0,
+    skewX: 0,
+    skewY: 0,
+    flipX: false,
+    flipY: false,
     points: buildConnectorPoints(data),
-    fill: undefined,
+    fill: 'transparent',
     objectCaching: false,
     hasBorders: false,
     transparentCorners: false,
@@ -459,7 +541,7 @@ export function createConnectorShape(
     stroke: options.stroke,
     strokeWidth: options.strokeWidth,
     strokeUniform: true,
-    fill: undefined,
+    fill: 'transparent',
     objectCaching: false,
     strokeLineCap: 'round',
     strokeLineJoin: 'round',
@@ -548,6 +630,7 @@ function replaceLegacyLineWithConnector(canvas: fabric.Canvas, legacyLine: fabri
 
 export function installConnectorCanvasHooks(canvas: fabric.Canvas): void {
   let isMigratingLegacyLine = false;
+  let isNormalizingConnector = false;
 
   const normalizeConnectorObject = (target?: fabric.Object): fabric.Object | null => {
     if (!target) {
@@ -580,9 +663,42 @@ export function installConnectorCanvasHooks(canvas: fabric.Canvas): void {
     return target;
   };
 
-  const enforceConnectorControls = (event: { target?: fabric.Object }) => {
-    const normalized = normalizeConnectorObject(event.target);
-    if (normalized && normalized !== event.target) {
+  const enforceConnectorControls = (
+    event: { target?: fabric.Object; selected?: fabric.Object[]; deselected?: fabric.Object[] }
+  ) => {
+    if (isNormalizingConnector) {
+      return;
+    }
+
+    const targets: fabric.Object[] = [];
+    if (event.target) {
+      targets.push(event.target);
+    }
+    if (Array.isArray(event.selected)) {
+      targets.push(...event.selected);
+    }
+
+    if (targets.length === 0) {
+      return;
+    }
+
+    let shouldRender = false;
+    isNormalizingConnector = true;
+    try {
+      targets.forEach((target) => {
+        const normalized = normalizeConnectorObject(target);
+        if (!normalized) {
+          return;
+        }
+        if (normalized !== target || isConnectorObject(normalized)) {
+          shouldRender = true;
+        }
+      });
+    } finally {
+      isNormalizingConnector = false;
+    }
+
+    if (shouldRender) {
       canvas.requestRenderAll();
     }
   };
@@ -592,4 +708,7 @@ export function installConnectorCanvasHooks(canvas: fabric.Canvas): void {
   });
 
   canvas.on('object:added', enforceConnectorControls);
+  canvas.on('object:modified', enforceConnectorControls);
+  canvas.on('selection:created', enforceConnectorControls);
+  canvas.on('selection:updated', enforceConnectorControls);
 }

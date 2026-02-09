@@ -5,6 +5,62 @@
   background: var(--bg);
 }
 
+.statusScreen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: #ececec;
+}
+
+.statusCard {
+  width: min(540px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  border: 1.5px solid #111111;
+  border-radius: 16px;
+  background: #ffffff;
+  padding: 26px 22px;
+  text-align: center;
+}
+
+.statusTitle {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  color: #111111;
+}
+
+.statusText {
+  margin: 0;
+  font-size: 14px;
+  color: #4f4f4f;
+}
+
+.statusLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 2px solid #111111;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #111111;
+  font-size: 14px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.statusLink:hover {
+  background: #111111;
+  color: #ffffff;
+}
+
 /* RemoteOk-style header */
 .header {
   display: flex;
