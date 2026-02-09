@@ -134,6 +134,9 @@ const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 5;
 const KEYBOARD_PAN_STEP = 80;
 const KEYBOARD_PAN_STEP_FAST = 220;
+const PAN_FRICTION = 0.92;
+const PAN_VELOCITY_THRESHOLD = 0.5;
+const VELOCITY_SAMPLE_WINDOW = 80;
 const GRID_REFERENCE_ZOOM = 1.12;
 const GRID_REFERENCE_SPACING = 18;
 const GRID_SPACING_SWING = 7.2;
@@ -534,6 +537,9 @@ export function Canvas() {
   const lastPosYRef = useRef(0);
   const spacebarPressedRef = useRef(false);
   const middleMousePanningRef = useRef(false);
+  const modifierPanningRef = useRef(false);
+  const panSamplesRef = useRef<Array<{ x: number; y: number; t: number }>>([]);
+  const panInertiaFrameRef = useRef<number | null>(null);
   const gestureScaleRef = useRef(1);
   const imagePasteNoticeTimerRef = useRef<number | null>(null);
   const [hasSelection, setHasSelection] = React.useState(false);
@@ -1606,6 +1612,65 @@ export function Canvas() {
     [canvas]
   );
 
+  const panViewportByRef = useRef(panViewportBy);
+  panViewportByRef.current = panViewportBy;
+
+  const stopPanInertia = React.useCallback(() => {
+    if (panInertiaFrameRef.current !== null) {
+      cancelAnimationFrame(panInertiaFrameRef.current);
+      panInertiaFrameRef.current = null;
+    }
+    panSamplesRef.current = [];
+  }, []);
+
+  const recordPanPosition = React.useCallback((clientX: number, clientY: number) => {
+    const now = performance.now();
+    const samples = panSamplesRef.current;
+    samples.push({ x: clientX, y: clientY, t: now });
+    while (samples.length > 0 && now - samples[0].t > VELOCITY_SAMPLE_WINDOW) {
+      samples.shift();
+    }
+  }, []);
+
+  const startPanInertia = React.useCallback(() => {
+    const samples = panSamplesRef.current;
+    if (samples.length < 2) {
+      panSamplesRef.current = [];
+      return;
+    }
+
+    const first = samples[0];
+    const last = samples[samples.length - 1];
+    const dt = last.t - first.t;
+    if (dt <= 0) {
+      panSamplesRef.current = [];
+      return;
+    }
+
+    // Convert to px per frame (~16.67ms at 60fps)
+    let vx = ((last.x - first.x) / dt) * 16.67;
+    let vy = ((last.y - first.y) / dt) * 16.67;
+    panSamplesRef.current = [];
+
+    if (Math.abs(vx) < PAN_VELOCITY_THRESHOLD && Math.abs(vy) < PAN_VELOCITY_THRESHOLD) {
+      return;
+    }
+
+    const animate = () => {
+      if (Math.abs(vx) < PAN_VELOCITY_THRESHOLD && Math.abs(vy) < PAN_VELOCITY_THRESHOLD) {
+        panInertiaFrameRef.current = null;
+        return;
+      }
+
+      panViewportByRef.current(vx, vy);
+      vx *= PAN_FRICTION;
+      vy *= PAN_FRICTION;
+      panInertiaFrameRef.current = requestAnimationFrame(animate);
+    };
+
+    panInertiaFrameRef.current = requestAnimationFrame(animate);
+  }, []);
+
   const showImagePasteNotice = React.useCallback(
     (type: 'success' | 'error', message: string) => {
       if (imagePasteNoticeTimerRef.current) {
@@ -1738,24 +1803,29 @@ export function Canvas() {
           isHandPanning = true;
           lastX = (e.e as any).clientX;
           lastY = (e.e as any).clientY;
+          stopPanInertia();
           applyCanvasCursors(canvas, activeTool, { grabbing: true });
         };
 
         const handleHandMouseMove = (e: fabric.TPointerEventInfo<fabric.TPointerEvent>) => {
           if (isHandPanning) {
+            const clientX = (e.e as any).clientX;
+            const clientY = (e.e as any).clientY;
             const vpt = canvas.viewportTransform;
             if (vpt) {
-              vpt[4] += (e.e as any).clientX - lastX;
-              vpt[5] += (e.e as any).clientY - lastY;
+              vpt[4] += clientX - lastX;
+              vpt[5] += clientY - lastY;
               canvas.requestRenderAll();
-              lastX = (e.e as any).clientX;
-              lastY = (e.e as any).clientY;
+              lastX = clientX;
+              lastY = clientY;
             }
+            recordPanPosition(clientX, clientY);
           }
         };
 
         const handleHandMouseUp = () => {
           isHandPanning = false;
+          startPanInertia();
           applyCanvasCursors(canvas, activeTool);
         };
 
@@ -1986,6 +2056,9 @@ export function Canvas() {
     scheduleCanvasPersist,
     setActiveTool,
     stickyPlacementColor,
+    stopPanInertia,
+    recordPanPosition,
+    startPanInertia,
   ]);
 
   // Update brush settings when color/width changes
@@ -2186,6 +2259,7 @@ export function Canvas() {
         lastPosXRef.current = (e.e as any).clientX;
         lastPosYRef.current = (e.e as any).clientY;
         canvas.selection = false;
+        stopPanInertia();
         applyCanvasCursors(canvas, activeTool, { grabbing: true });
         if (containerRef.current) {
           containerRef.current.classList.add(styles.panning);
@@ -2195,20 +2269,24 @@ export function Canvas() {
 
     const handleMiddleMouseMove = (e: fabric.TPointerEventInfo<fabric.TPointerEvent>) => {
       if (middleMousePanningRef.current) {
+        const clientX = (e.e as any).clientX;
+        const clientY = (e.e as any).clientY;
         const vpt = canvas.viewportTransform;
         if (vpt) {
-          vpt[4] += (e.e as any).clientX - lastPosXRef.current;
-          vpt[5] += (e.e as any).clientY - lastPosYRef.current;
+          vpt[4] += clientX - lastPosXRef.current;
+          vpt[5] += clientY - lastPosYRef.current;
           canvas.requestRenderAll();
-          lastPosXRef.current = (e.e as any).clientX;
-          lastPosYRef.current = (e.e as any).clientY;
+          lastPosXRef.current = clientX;
+          lastPosYRef.current = clientY;
         }
+        recordPanPosition(clientX, clientY);
       }
     };
 
     const handleMiddleMouseUp = (e: fabric.TPointerEventInfo<fabric.TPointerEvent>) => {
       if ((e.e as any).button === 1 && middleMousePanningRef.current) {
         middleMousePanningRef.current = false;
+        startPanInertia();
         canvas.selection = shouldEnableSelection(activeTool);
         if (spacebarPressedRef.current) {
           applyCanvasCursors(canvas, activeTool, { panReady: true });
@@ -2241,7 +2319,7 @@ export function Canvas() {
       canvas.off('mouse:up', handleMiddleMouseUp);
       canvasElement.removeEventListener('mousedown', preventMiddleMouseDefault);
     };
-  }, [canvas, activeTool]);
+  }, [canvas, activeTool, stopPanInertia, recordPanPosition, startPanInertia]);
 
   // Handle pan with spacebar + mouse drag
   useEffect(() => {
@@ -2277,6 +2355,7 @@ export function Canvas() {
         canvas.selection = false;
         lastPosXRef.current = (event.e as any).clientX;
         lastPosYRef.current = (event.e as any).clientY;
+        stopPanInertia();
         applyCanvasCursors(canvas, activeTool, { grabbing: true });
       }
     };
@@ -2284,20 +2363,24 @@ export function Canvas() {
     const handleMouseMove = (event: fabric.TPointerEventInfo<fabric.TPointerEvent>) => {
       if (isPanningRef.current && spacebarPressedRef.current) {
         const e = event.e;
+        const clientX = (e as any).clientX;
+        const clientY = (e as any).clientY;
         const vpt = canvas.viewportTransform;
         if (vpt) {
-          vpt[4] += (e as any).clientX - lastPosXRef.current;
-          vpt[5] += (e as any).clientY - lastPosYRef.current;
+          vpt[4] += clientX - lastPosXRef.current;
+          vpt[5] += clientY - lastPosYRef.current;
           canvas.requestRenderAll();
-          lastPosXRef.current = (e as any).clientX;
-          lastPosYRef.current = (e as any).clientY;
+          lastPosXRef.current = clientX;
+          lastPosYRef.current = clientY;
         }
+        recordPanPosition(clientX, clientY);
       }
     };
 
     const handleMouseUp = () => {
       if (isPanningRef.current) {
         isPanningRef.current = false;
+        startPanInertia();
         canvas.selection = shouldEnableSelection(activeTool);
         if (spacebarPressedRef.current) {
           applyCanvasCursors(canvas, activeTool, { panReady: true });
@@ -2320,9 +2403,68 @@ export function Canvas() {
       canvas.off('mouse:move', handleMouseMove);
       canvas.off('mouse:up', handleMouseUp);
     };
-  }, [canvas, activeTool]);
+  }, [canvas, activeTool, stopPanInertia, recordPanPosition, startPanInertia]);
 
-  // Handle trackpad/mouse wheel zoom (no modifier required)
+  // Handle Cmd/Ctrl + left-click drag panning
+  useEffect(() => {
+    if (!canvas || !containerRef.current) return;
+
+    const handleModifierMouseDown = (e: fabric.TPointerEventInfo<fabric.TPointerEvent>) => {
+      const evt = e.e as any;
+      if ((evt.metaKey || evt.ctrlKey) && evt.button === 0) {
+        e.e.preventDefault();
+        modifierPanningRef.current = true;
+        lastPosXRef.current = evt.clientX;
+        lastPosYRef.current = evt.clientY;
+        canvas.selection = false;
+        stopPanInertia();
+        applyCanvasCursors(canvas, activeTool, { grabbing: true });
+        if (containerRef.current) {
+          containerRef.current.classList.add(styles.panning);
+        }
+      }
+    };
+
+    const handleModifierMouseMove = (e: fabric.TPointerEventInfo<fabric.TPointerEvent>) => {
+      if (modifierPanningRef.current) {
+        const clientX = (e.e as any).clientX;
+        const clientY = (e.e as any).clientY;
+        const vpt = canvas.viewportTransform;
+        if (vpt) {
+          vpt[4] += clientX - lastPosXRef.current;
+          vpt[5] += clientY - lastPosYRef.current;
+          canvas.requestRenderAll();
+          lastPosXRef.current = clientX;
+          lastPosYRef.current = clientY;
+        }
+        recordPanPosition(clientX, clientY);
+      }
+    };
+
+    const handleModifierMouseUp = () => {
+      if (modifierPanningRef.current) {
+        modifierPanningRef.current = false;
+        startPanInertia();
+        canvas.selection = shouldEnableSelection(activeTool);
+        applyCanvasCursors(canvas, activeTool);
+        if (containerRef.current) {
+          containerRef.current.classList.remove(styles.panning);
+        }
+      }
+    };
+
+    canvas.on('mouse:down', handleModifierMouseDown);
+    canvas.on('mouse:move', handleModifierMouseMove);
+    canvas.on('mouse:up', handleModifierMouseUp);
+
+    return () => {
+      canvas.off('mouse:down', handleModifierMouseDown);
+      canvas.off('mouse:move', handleModifierMouseMove);
+      canvas.off('mouse:up', handleModifierMouseUp);
+    };
+  }, [canvas, activeTool, stopPanInertia, recordPanPosition, startPanInertia]);
+
+  // Handle trackpad/mouse wheel zoom (Cmd/Ctrl + scroll pans instead)
   useEffect(() => {
     if (!canvas) return;
 
@@ -2331,6 +2473,12 @@ export function Canvas() {
 
       event.preventDefault();
       event.stopPropagation();
+
+      // Cmd/Ctrl + scroll/swipe → pan instead of zoom
+      if (event.metaKey || event.ctrlKey) {
+        panViewportBy(-event.deltaX, -event.deltaY);
+        return;
+      }
 
       const delta = event.deltaY;
       let newZoom = canvas.getZoom();
@@ -2349,7 +2497,7 @@ export function Canvas() {
     return () => {
       canvas.off('mouse:wheel', handleWheel);
     };
-  }, [canvas, setZoom]);
+  }, [canvas, setZoom, panViewportBy]);
 
   // Handle Safari trackpad pinch gestures
   useEffect(() => {
