@@ -290,6 +290,26 @@ function normalizeCanvasBackground(value: unknown): string {
   return trimmedValue;
 }
 
+function normalizeObjectFills(objects: unknown[]): unknown[] {
+  return objects.map((obj) => {
+    if (obj == null || typeof obj !== 'object') return obj;
+    const record = obj as Record<string, unknown>;
+
+    // Replace null/undefined fill with 'transparent' to prevent
+    // Firebase RTDB from stripping it and Fabric.js defaulting to black.
+    if (record.fill === null || record.fill === undefined) {
+      record.fill = 'transparent';
+    }
+
+    // Recursively handle nested objects (Groups)
+    if (Array.isArray(record.objects)) {
+      record.objects = normalizeObjectFills(record.objects as unknown[]);
+    }
+
+    return record;
+  });
+}
+
 function normalizeBoardCanvasState(value: BoardCanvas | null | undefined): BoardCanvas {
   const rawObjects = Array.isArray(value?.objects) ? value.objects : [];
   const seenObjectIds = new Set<string>();
@@ -310,6 +330,8 @@ function normalizeBoardCanvasState(value: BoardCanvas | null | undefined): Board
   }
   objects.reverse();
 
+  const normalizedObjects = normalizeObjectFills(objects);
+
   const version =
     typeof value?.version === 'string' && value.version.length > 0
       ? value.version
@@ -319,7 +341,7 @@ function normalizeBoardCanvasState(value: BoardCanvas | null | undefined): Board
   return {
     ...(value ?? {}),
     version,
-    objects,
+    objects: normalizedObjects,
     background,
   };
 }
