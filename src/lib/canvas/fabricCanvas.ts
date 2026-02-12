@@ -23,8 +23,6 @@ const EDGE_HANDLE_RADIUS = 4.6;
 const ROTATE_HANDLE_RADIUS = 11.5;
 const FALLBACK_CANVAS_WIDTH = 1280;
 const FALLBACK_CANVAS_HEIGHT = 720;
-const FALLBACK_MAX_CANVAS_WIDTH = 1800;
-const FALLBACK_MAX_CANVAS_HEIGHT = 1000;
 
 function toPositiveDimension(value: number | undefined, fallback: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
@@ -36,14 +34,12 @@ function toPositiveDimension(value: number | undefined, fallback: number): numbe
 function getCanvasDimensions(width: number, height: number): { width: number; height: number } {
   const defaultWidth = toPositiveDimension(CANVAS_CONFIG.defaultWidth, FALLBACK_CANVAS_WIDTH);
   const defaultHeight = toPositiveDimension(CANVAS_CONFIG.defaultHeight, FALLBACK_CANVAS_HEIGHT);
-  const maxWidth = Math.max(
-    toPositiveDimension(CANVAS_CONFIG.maxWidth, FALLBACK_MAX_CANVAS_WIDTH),
-    320
-  );
-  const maxHeight = Math.max(
-    toPositiveDimension(CANVAS_CONFIG.maxHeight, FALLBACK_MAX_CANVAS_HEIGHT),
-    240
-  );
+  const configuredMaxWidth = toPositiveDimension(CANVAS_CONFIG.maxWidth, 0);
+  const configuredMaxHeight = toPositiveDimension(CANVAS_CONFIG.maxHeight, 0);
+  const maxWidth =
+    configuredMaxWidth > 0 ? Math.max(configuredMaxWidth, 320) : Number.POSITIVE_INFINITY;
+  const maxHeight =
+    configuredMaxHeight > 0 ? Math.max(configuredMaxHeight, 240) : Number.POSITIVE_INFINITY;
 
   return {
     width: Math.min(toPositiveDimension(width, defaultWidth), maxWidth),

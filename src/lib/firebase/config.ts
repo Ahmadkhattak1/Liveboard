@@ -1,6 +1,7 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import { getAuth, Auth } from 'firebase/auth';
 import { getDatabase, Database } from 'firebase/database';
+import { getFirestore, Firestore } from 'firebase/firestore';
 import { getStorage, FirebaseStorage } from 'firebase/storage';
 
 // Validate required environment variables
@@ -44,6 +45,7 @@ function validateFirebaseConfig() {
 let app: FirebaseApp;
 let auth: Auth;
 let database: Database;
+let firestore: Firestore;
 let storage: FirebaseStorage;
 
 if (typeof window !== 'undefined') {
@@ -52,6 +54,7 @@ if (typeof window !== 'undefined') {
     app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
     auth = getAuth(app);
     database = getDatabase(app);
+    firestore = getFirestore(app);
     storage = getStorage(app);
   } catch (error) {
     console.error('Firebase initialization error:', error);
@@ -59,4 +62,4 @@ if (typeof window !== 'undefined') {
   }
 }
 
-export { app, auth, database, storage };
+export { app, auth, database, firestore, storage };

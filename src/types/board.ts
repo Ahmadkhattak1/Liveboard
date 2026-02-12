@@ -7,6 +7,7 @@ export interface BoardMetadata {
   updatedAt: number;
   isPublic: boolean;
   shareCode?: string | null;
+  allowSharedEditing?: boolean;
 }
 
 export interface SerializedCanvasState {
@@ -53,6 +54,7 @@ export interface Board {
 
 export interface UserPresence {
   userId: string;
+  sessionId?: string;
   displayName: string;
   color: string;
   emoji: string;

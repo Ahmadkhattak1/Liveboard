@@ -1,54 +1,184 @@
 import {
+  AuthCredential,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut as firebaseSignOut,
   signInAnonymously,
   signInWithPopup,
+  signInWithCredential,
+  getAuth as getAuthForApp,
   GoogleAuthProvider,
+  linkWithPopup,
   updateProfile,
   User as FirebaseUser,
   onAuthStateChanged,
   UserCredential,
 } from 'firebase/auth';
-import { auth } from './config';
+import { FirebaseError } from 'firebase/app';
+import { deleteApp, initializeApp } from 'firebase/app';
+import { app, auth } from './config';
 import { User, LoginCredentials, SignupCredentials } from '@/types/user';
 import { getRandomEmoji } from '@/lib/constants/tools';
 import { getRandomColor } from '@/lib/constants/colors';
-import { get, ref, set } from 'firebase/database';
-import { database } from './config';
+import {
+  deleteUserDataFromStores,
+  ensureUserProfileInFirestore,
+  getFullUserFromFirestore,
+  mergeImportedUserDataIntoAccount,
+  UserProfileSeed,
+} from './userStore';
+import { transferBoardOwnership } from './database';
 
-interface UserProfileData {
-  email: string | null;
-  displayName: string;
-  emoji: string;
-  color: string;
-  isAnonymous: boolean;
+function toUserProfileSeed(
+  firebaseUser: FirebaseUser,
+  overrides: Partial<UserProfileSeed> = {}
+): UserProfileSeed {
+  const emoji = overrides.emoji ?? getRandomEmoji();
+
+  return {
+    email: overrides.email ?? firebaseUser.email,
+    displayName:
+      overrides.displayName ??
+      firebaseUser.displayName ??
+      (firebaseUser.isAnonymous ? `Anonymous ${emoji}` : 'Google User'),
+    emoji,
+    color: overrides.color ?? getRandomColor(),
+    isAnonymous: overrides.isAnonymous ?? firebaseUser.isAnonymous,
+  };
 }
 
-async function ensureUserProfile(userId: string, data: UserProfileData): Promise<void> {
-  const userRef = ref(database, `users/${userId}`);
-  const userSnapshot = await get(userRef);
-
-  if (userSnapshot.exists()) {
-    return;
+function isAccountAlreadyLinkedError(error: unknown): error is FirebaseError {
+  if (!(error instanceof FirebaseError)) {
+    return false;
   }
 
-  await set(userRef, {
-    id: userId,
-    email: data.email,
-    displayName: data.displayName,
-    emoji: data.emoji,
-    color: data.color,
+  return (
+    error.code === 'auth/credential-already-in-use' ||
+    error.code === 'auth/email-already-in-use' ||
+    error.code === 'auth/account-exists-with-different-credential'
+  );
+}
+
+function convertFirebaseUserWithDefaults(firebaseUser: FirebaseUser): User {
+  return {
+    id: firebaseUser.uid,
+    email: firebaseUser.email,
+    displayName: firebaseUser.displayName || 'Anonymous',
+    emoji: '👤',
+    color: '#2563EB',
     createdBoards: [],
     createdAt: Date.now(),
-    isAnonymous: data.isAnonymous,
+    isAnonymous: firebaseUser.isAnonymous,
+  };
+}
+
+function applyStoredProfile(
+  firebaseUser: FirebaseUser,
+  storedProfile: Awaited<ReturnType<typeof getFullUserFromFirestore>>
+): User {
+  const fallbackUser = convertFirebaseUserWithDefaults(firebaseUser);
+
+  if (!storedProfile) {
+    return fallbackUser;
+  }
+
+  return {
+    id: firebaseUser.uid,
+    email: firebaseUser.email ?? storedProfile.email,
+    displayName: storedProfile.displayName || fallbackUser.displayName,
+    emoji: storedProfile.emoji || fallbackUser.emoji,
+    color: storedProfile.color || fallbackUser.color,
+    createdBoards: storedProfile.createdBoards,
+    createdAt: storedProfile.createdAt,
+    isAnonymous: firebaseUser.isAnonymous,
+  };
+}
+
+async function convertFirebaseUserWithProfile(
+  firebaseUser: FirebaseUser | null
+): Promise<User | null> {
+  if (!firebaseUser) {
+    return null;
+  }
+
+  const seed = toUserProfileSeed(firebaseUser, {
+    isAnonymous: firebaseUser.isAnonymous,
   });
+  await ensureUserProfileInFirestore(firebaseUser.uid, seed);
+  const storedProfile = await getFullUserFromFirestore(firebaseUser.uid);
+  return applyStoredProfile(firebaseUser, storedProfile);
+}
+
+async function resolveUserIdForCredential(credential: AuthCredential): Promise<string> {
+  const secondaryAppName = `liveboard-migration-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2)}`;
+  const secondaryApp = initializeApp(app.options, secondaryAppName);
+
+  try {
+    const secondaryAuth = getAuthForApp(secondaryApp);
+    const secondarySignIn = await signInWithCredential(secondaryAuth, credential);
+    return secondarySignIn.user.uid;
+  } finally {
+    try {
+      await deleteApp(secondaryApp);
+    } catch (cleanupError) {
+      console.warn('Unable to clean up secondary Firebase app:', cleanupError);
+    }
+  }
+}
+
+async function migrateAnonymousUserIntoExistingGoogleAccount(
+  anonymousUser: FirebaseUser,
+  credential: AuthCredential
+): Promise<UserCredential> {
+  const anonymousUserId = anonymousUser.uid;
+  const sourceSnapshot = await getFullUserFromFirestore(anonymousUserId);
+  const sourceBoards = sourceSnapshot?.createdBoards ?? [];
+  const targetUserId = await resolveUserIdForCredential(credential);
+
+  if (sourceBoards.length > 0) {
+    await transferBoardOwnership(anonymousUserId, targetUserId, sourceBoards);
+  }
+
+  await deleteUserDataFromStores(anonymousUserId);
+
+  const googleCredential = await signInWithCredential(auth, credential);
+  const googleSeed = toUserProfileSeed(googleCredential.user, {
+    isAnonymous: false,
+  });
+
+  await mergeImportedUserDataIntoAccount(
+    googleCredential.user.uid,
+    googleSeed,
+    sourceSnapshot
+  );
+
+  try {
+    await anonymousUser.delete();
+  } catch (deleteError) {
+    console.warn('Unable to delete anonymous user after migration:', deleteError);
+  }
+
+  return googleCredential;
 }
 
 export async function loginWithEmail(
   credentials: LoginCredentials
 ): Promise<UserCredential> {
-  return signInWithEmailAndPassword(auth, credentials.email, credentials.password);
+  const userCredential = await signInWithEmailAndPassword(
+    auth,
+    credentials.email,
+    credentials.password
+  );
+  await ensureUserProfileInFirestore(
+    userCredential.user.uid,
+    toUserProfileSeed(userCredential.user, {
+      email: userCredential.user.email ?? credentials.email,
+      isAnonymous: false,
+    })
+  );
+  return userCredential;
 }
 
 export async function signupWithEmail(
@@ -84,7 +214,7 @@ export async function loginAnonymously(): Promise<UserCredential> {
   const emoji = getRandomEmoji();
   const color = getRandomColor();
 
-  await ensureUserProfile(userCredential.user.uid, {
+  await ensureUserProfileInFirestore(userCredential.user.uid, {
     email: null,
     displayName: `Anonymous ${emoji}`,
     emoji,
@@ -97,21 +227,44 @@ export async function loginAnonymously(): Promise<UserCredential> {
 
 export async function loginWithGoogle(): Promise<UserCredential> {
   const provider = new GoogleAuthProvider();
-  const userCredential = await signInWithPopup(auth, provider);
+  const currentUser = auth.currentUser;
+  if (currentUser?.isAnonymous) {
+    try {
+      const linkedCredential = await linkWithPopup(currentUser, provider);
+      await ensureUserProfileInFirestore(
+        linkedCredential.user.uid,
+        toUserProfileSeed(linkedCredential.user, {
+          isAnonymous: false,
+        })
+      );
+      return linkedCredential;
+    } catch (linkError) {
+      if (!isAccountAlreadyLinkedError(linkError)) {
+        throw linkError;
+      }
 
-  const emoji = getRandomEmoji();
-  const color = getRandomColor();
-  const displayName = userCredential.user.displayName || 'Google User';
+      const credentialFromError = GoogleAuthProvider.credentialFromError(linkError);
+      if (!credentialFromError) {
+        throw new Error(
+          'Unable to complete account migration. Please try signing in with Google again.'
+        );
+      }
 
-  await ensureUserProfile(userCredential.user.uid, {
-    email: userCredential.user.email,
-    displayName,
-    emoji,
-    color,
-    isAnonymous: false,
-  });
+      return migrateAnonymousUserIntoExistingGoogleAccount(
+        currentUser,
+        credentialFromError
+      );
+    }
+  }
 
-  return userCredential;
+  const googleCredential = await signInWithPopup(auth, provider);
+  await ensureUserProfileInFirestore(
+    googleCredential.user.uid,
+    toUserProfileSeed(googleCredential.user, {
+      isAnonymous: false,
+    })
+  );
+  return googleCredential;
 }
 
 export async function signOut(): Promise<void> {
@@ -120,40 +273,48 @@ export async function signOut(): Promise<void> {
 
 export async function createUserProfile(
   userId: string,
-  data: UserProfileData
+  data: UserProfileSeed
 ): Promise<void> {
-  const userRef = ref(database, `users/${userId}`);
-  await set(userRef, {
-    id: userId,
-    email: data.email,
-    displayName: data.displayName,
-    emoji: data.emoji,
-    color: data.color,
-    createdBoards: [],
-    createdAt: Date.now(),
-    isAnonymous: data.isAnonymous,
-  });
+  await ensureUserProfileInFirestore(userId, data);
 }
 
 export function convertFirebaseUser(firebaseUser: FirebaseUser | null): User | null {
-  if (!firebaseUser) return null;
+  if (!firebaseUser) {
+    return null;
+  }
 
-  return {
-    id: firebaseUser.uid,
-    email: firebaseUser.email,
-    displayName: firebaseUser.displayName || 'Anonymous',
-    emoji: getRandomEmoji(),
-    color: getRandomColor(),
-    createdBoards: [],
-    createdAt: Date.now(),
-    isAnonymous: firebaseUser.isAnonymous,
-  };
+  return convertFirebaseUserWithDefaults(firebaseUser);
 }
 
 export function onAuthStateChange(callback: (user: User | null) => void): () => void {
+  let eventVersion = 0;
+
   return onAuthStateChanged(auth, (firebaseUser) => {
-    const user = convertFirebaseUser(firebaseUser);
-    callback(user);
+    const currentVersion = eventVersion + 1;
+    eventVersion = currentVersion;
+
+    // Never block auth state delivery on profile/network calls.
+    callback(convertFirebaseUser(firebaseUser));
+
+    void (async () => {
+      if (!firebaseUser) {
+        return;
+      }
+
+      try {
+        const user = await convertFirebaseUserWithProfile(firebaseUser);
+        if (currentVersion !== eventVersion) {
+          return;
+        }
+        callback(user);
+      } catch (error) {
+        console.error('Error resolving authenticated user profile:', error);
+        if (currentVersion !== eventVersion) {
+          return;
+        }
+        callback(convertFirebaseUser(firebaseUser));
+      }
+    })();
   });
 }
 

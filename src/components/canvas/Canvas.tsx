@@ -5,6 +5,7 @@ import * as fabric from 'fabric';
 import { useParams } from 'next/navigation';
 import { useCanvas } from './CanvasProvider';
 import { useAuth } from '@/components/providers/AuthProvider';
+import { useBoard } from '@/components/providers/BoardProvider';
 import { initializeFabricCanvas, resizeCanvas } from '@/lib/canvas/fabricCanvas';
 import {
   DRAFT_SHAPE_FLAG,
@@ -46,7 +47,7 @@ import {
   serializeCanvas,
   stringifyCanvasState,
 } from '@/lib/canvas/serialization';
-import { APP_CONFIG, CANVAS_CONFIG } from '@/lib/constants/config';
+import { APP_CONFIG } from '@/lib/constants/config';
 import { generateObjectId } from '@/lib/utils/generateId';
 import { validateImageDimensions, validateImageFile } from '@/lib/utils/validators';
 import { BoardCanvas, UserPresence } from '@/types/board';
@@ -521,13 +522,6 @@ function resolveGridZoomLevel(canvas: fabric.Canvas): number {
   return clampNumber(zoomLevel, MIN_ZOOM, MAX_ZOOM);
 }
 
-function resolveCanvasConstraint(value: number, fallback: number): number {
-  if (!Number.isFinite(value) || value <= 0) {
-    return fallback;
-  }
-  return Math.round(value);
-}
-
 export function Canvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageFileInputRef = useRef<HTMLInputElement>(null);
@@ -565,9 +559,14 @@ export function Canvas() {
   } = useCanvas();
   const params = useParams<{ boardId: string }>();
   const { user, loading: authLoading } = useAuth();
+  const { canEdit } = useBoard();
   const boardId = typeof params?.boardId === 'string' ? params.boardId : '';
   const actorId = user?.id ?? 'guest-user';
   const syncUserId = user?.id ?? null;
+  const canEditBoard = canEdit;
+  const effectiveTool = canEditBoard ? activeTool : 'hand';
+  const presenceSessionIdRef = useRef<string>(`presence-${generateObjectId()}`);
+  const localPresenceSessionId = presenceSessionIdRef.current;
   const [presenceByUser, setPresenceByUser] = React.useState<Record<string, UserPresence>>({});
   const [canvasHydrated, setCanvasHydrated] = React.useState(false);
   const [showHydrationOverlay, setShowHydrationOverlay] = React.useState(false);
@@ -596,16 +595,6 @@ export function Canvas() {
   const viewportTickThrottleRef = useRef(0);
   const hasSeenInitialRemoteCanvasRef = useRef(false);
   const autoLoginAttemptedRef = useRef(false);
-  const minCanvasWidth = resolveCanvasConstraint(CANVAS_CONFIG.minWidth, 900);
-  const minCanvasHeight = resolveCanvasConstraint(CANVAS_CONFIG.minHeight, 560);
-  const maxCanvasWidth = resolveCanvasConstraint(CANVAS_CONFIG.maxWidth, 1800);
-  const maxCanvasHeight = resolveCanvasConstraint(CANVAS_CONFIG.maxHeight, 1000);
-  const canvasSizingStyle = {
-    ['--canvas-min-width' as const]: `${Math.min(minCanvasWidth, maxCanvasWidth)}px`,
-    ['--canvas-min-height' as const]: `${Math.min(minCanvasHeight, maxCanvasHeight)}px`,
-    ['--canvas-max-width' as const]: `${maxCanvasWidth}px`,
-    ['--canvas-max-height' as const]: `${maxCanvasHeight}px`,
-  } as React.CSSProperties;
 
   useEffect(() => {
     if (authLoading || user?.id || autoLoginAttemptedRef.current) {
@@ -620,9 +609,9 @@ export function Canvas() {
   }, [authLoading, user?.id]);
 
   useEffect(() => {
-    activeToolRef.current = activeTool;
+    activeToolRef.current = effectiveTool;
 
-    if (activeTool !== 'pen') {
+    if (effectiveTool !== 'pen') {
       isLocalDrawingRef.current = false;
       localDrawingTrailRef.current = [];
       if (drawingFlushTimerRef.current !== null) {
@@ -630,22 +619,22 @@ export function Canvas() {
         drawingFlushTimerRef.current = null;
       }
     }
-  }, [activeTool]);
+  }, [effectiveTool]);
 
   useEffect(() => {
     if (!boardId || !syncUserId) {
       return;
     }
 
-    void updatePresenceFields(boardId, syncUserId, {
+    void updatePresenceFields(boardId, localPresenceSessionId, {
       activity: {
-        tool: activeTool,
+        tool: effectiveTool,
         isDrawing: false,
         trail: [],
         updatedAt: Date.now(),
       },
     });
-  }, [activeTool, boardId, syncUserId]);
+  }, [boardId, effectiveTool, localPresenceSessionId, syncUserId]);
 
   // Initialize canvas
   useEffect(() => {
@@ -829,7 +818,7 @@ export function Canvas() {
   }, []);
 
   const flushCanvasPersist = React.useCallback(async () => {
-    if (!boardId || !syncUserId) {
+    if (!boardId || !syncUserId || !canEditBoard) {
       return;
     }
     if (isPersistingCanvasRef.current || !pendingCanvasPersistRef.current) {
@@ -853,13 +842,14 @@ export function Canvas() {
         void flushCanvasPersist();
       }
     }
-  }, [boardId, prunePersistedMutations, syncUserId]);
+  }, [boardId, canEditBoard, prunePersistedMutations, syncUserId]);
 
   const persistCanvasNow = React.useCallback(() => {
     if (
       !canvas ||
       !boardId ||
       !syncUserId ||
+      !canEditBoard ||
       !hasSeenInitialRemoteCanvasRef.current ||
       isApplyingRemoteCanvasRef.current
     ) {
@@ -913,13 +903,14 @@ export function Canvas() {
       const sel = new fabric.ActiveSelection(selectedObjects, { canvas });
       canvas.setActiveObject(sel);
     }
-  }, [actorId, boardId, canvas, flushCanvasPersist, syncUserId]);
+  }, [actorId, boardId, canvas, canEditBoard, flushCanvasPersist, syncUserId]);
 
   const scheduleCanvasPersist = React.useCallback(() => {
     if (
       !canvas ||
       !boardId ||
       !syncUserId ||
+      !canEditBoard ||
       !canvasHydrated ||
       !hasSeenInitialRemoteCanvasRef.current ||
       isApplyingRemoteCanvasRef.current
@@ -934,7 +925,7 @@ export function Canvas() {
     canvasSyncTimerRef.current = window.setTimeout(() => {
       persistCanvasNow();
     }, CANVAS_SYNC_DEBOUNCE_MS);
-  }, [boardId, canvas, canvasHydrated, persistCanvasNow, syncUserId]);
+  }, [boardId, canvas, canEditBoard, canvasHydrated, persistCanvasNow, syncUserId]);
 
   useEffect(() => {
     return () => {
@@ -1041,7 +1032,7 @@ export function Canvas() {
   }, [boardId, canvas, flushCanvasPersist]);
 
   useEffect(() => {
-    if (!canvas || !boardId || !syncUserId) {
+    if (!canvas || !boardId || !syncUserId || !canEditBoard) {
       return;
     }
 
@@ -1133,6 +1124,7 @@ export function Canvas() {
   }, [
     boardId,
     canvas,
+    canEditBoard,
     enqueueObjectDeleteMutation,
     enqueueObjectUpsertMutation,
     persistCanvasNow,
@@ -1141,15 +1133,15 @@ export function Canvas() {
   ]);
 
   useEffect(() => {
-    if (!canvas || !boardId || !syncUserId || !canvasHydrated) {
+    if (!canvas || !boardId || !syncUserId || !canvasHydrated || !canEditBoard) {
       return;
     }
 
     scheduleCanvasPersist();
-  }, [boardId, canvas, canvasHydrated, scheduleCanvasPersist, syncUserId]);
+  }, [boardId, canvas, canEditBoard, canvasHydrated, scheduleCanvasPersist, syncUserId]);
 
   useEffect(() => {
-    if (!canvas || !boardId || !syncUserId) {
+    if (!canvas || !boardId || !syncUserId || !canEditBoard) {
       return;
     }
 
@@ -1173,7 +1165,7 @@ export function Canvas() {
       window.removeEventListener('beforeunload', flushForNavigation);
       document.removeEventListener('visibilitychange', handleVisibilityFlush);
     };
-  }, [boardId, canvas, persistCanvasNow, syncUserId]);
+  }, [boardId, canvas, canEditBoard, persistCanvasNow, syncUserId]);
 
   useEffect(() => {
     if (!syncUserId) {
@@ -1235,6 +1227,7 @@ export function Canvas() {
 
     const initialPresence: UserPresence = {
       userId: syncUserId,
+      sessionId: localPresenceSessionId,
       displayName: presenceIdentity.displayName,
       color: presenceIdentity.color,
       emoji: presenceIdentity.emoji,
@@ -1249,7 +1242,7 @@ export function Canvas() {
       },
     };
 
-    void updatePresence(boardId, syncUserId, initialPresence);
+    void updatePresence(boardId, localPresenceSessionId, initialPresence);
     lastCursorSentAtRef.current = 0;
     lastCursorSentRef.current = null;
     queuedCursorRef.current = null;
@@ -1272,7 +1265,7 @@ export function Canvas() {
 
       lastCursorSentAtRef.current = Date.now();
       lastCursorSentRef.current = nextCursor;
-      void updatePresenceFields(boardId, syncUserId, {
+      void updatePresenceFields(boardId, localPresenceSessionId, {
         cursor: nextCursor,
         isActive: true,
       });
@@ -1312,7 +1305,7 @@ export function Canvas() {
       }
 
       lastDrawingSentAtRef.current = Date.now();
-      void updatePresenceFields(boardId, syncUserId, {
+      void updatePresenceFields(boardId, localPresenceSessionId, {
         activity: {
           tool: 'pen',
           isDrawing: true,
@@ -1405,7 +1398,7 @@ export function Canvas() {
         drawingFlushTimerRef.current = null;
       }
 
-      void updatePresenceFields(boardId, syncUserId, {
+      void updatePresenceFields(boardId, localPresenceSessionId, {
         activity: {
           tool: activeToolRef.current,
           isDrawing: false,
@@ -1417,8 +1410,9 @@ export function Canvas() {
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        void updatePresence(boardId, syncUserId, {
+        void updatePresence(boardId, localPresenceSessionId, {
           userId: syncUserId,
+          sessionId: localPresenceSessionId,
           displayName: presenceIdentity.displayName,
           color: presenceIdentity.color,
           emoji: presenceIdentity.emoji,
@@ -1435,7 +1429,7 @@ export function Canvas() {
         return;
       }
 
-      void updatePresenceFields(boardId, syncUserId, {
+      void updatePresenceFields(boardId, localPresenceSessionId, {
         isActive: false,
         activity: {
           tool: activeToolRef.current,
@@ -1471,11 +1465,12 @@ export function Canvas() {
         drawingFlushTimerRef.current = null;
       }
 
-      void removePresence(boardId, syncUserId);
+      void removePresence(boardId, localPresenceSessionId);
     };
   }, [
     boardId,
     canvas,
+    localPresenceSessionId,
     presenceIdentity.color,
     presenceIdentity.displayName,
     presenceIdentity.emoji,
@@ -1507,7 +1502,10 @@ export function Canvas() {
     ? []
     : Object.values(presenceByUser)
       .filter((presence) => {
-        if (!presence.isActive || presence.userId === syncUserId) {
+        const isLocalPresence =
+          (presence.sessionId && presence.sessionId === localPresenceSessionId) ||
+          (!presence.sessionId && presence.userId === syncUserId);
+        if (!presence.isActive || isLocalPresence) {
           return false;
         }
         return Date.now() - presence.lastSeen <= REMOTE_CURSOR_TTL_MS;
@@ -1525,7 +1523,10 @@ export function Canvas() {
     ? []
     : Object.values(presenceByUser)
       .filter((presence) => {
-        if (!presence.isActive || presence.userId === syncUserId) {
+        const isLocalPresence =
+          (presence.sessionId && presence.sessionId === localPresenceSessionId) ||
+          (!presence.sessionId && presence.userId === syncUserId);
+        if (!presence.isActive || isLocalPresence) {
           return false;
         }
         if (Date.now() - presence.lastSeen > REMOTE_CURSOR_TTL_MS) {
@@ -1540,14 +1541,14 @@ export function Canvas() {
           toViewportCoordinates(canvas, point)
         );
         return {
-          userId: presence.userId,
+          presenceId: presence.sessionId ?? presence.userId,
           color: presence.color,
           points: points.map((point) => `${roundCoordinate(point.x)},${roundCoordinate(point.y)}`).join(' '),
         };
       });
 
   const deleteActiveSelection = React.useCallback(() => {
-    if (!canvas) return;
+    if (!canvas || !canEditBoard) return;
 
     const activeObjects = canvas.getActiveObjects();
     if (!activeObjects || activeObjects.length === 0) {
@@ -1564,7 +1565,7 @@ export function Canvas() {
 
     canvas.discardActiveObject();
     canvas.requestRenderAll();
-  }, [canvas]);
+  }, [canvas, canEditBoard]);
 
   const handleDelete = React.useCallback(() => {
     deleteActiveSelection();
@@ -1583,20 +1584,20 @@ export function Canvas() {
   }, [canvas, selectedSticky]);
 
   const handleStickyEdit = React.useCallback(() => {
-    if (!canvas) return;
+    if (!canvas || !canEditBoard) return;
     const stickyContainer = resolveSelectedSticky();
     if (!stickyContainer) return;
     focusStickyNoteEditor(canvas, stickyContainer, true);
-  }, [canvas, resolveSelectedSticky]);
+  }, [canEditBoard, canvas, resolveSelectedSticky]);
 
   const handleStickyTypeKey = React.useCallback(
     (value: string) => {
-      if (!canvas) return;
+      if (!canvas || !canEditBoard) return;
       const stickyContainer = resolveSelectedSticky();
       if (!stickyContainer) return;
       typeInStickyNote(canvas, stickyContainer, value);
     },
-    [canvas, resolveSelectedSticky]
+    [canEditBoard, canvas, resolveSelectedSticky]
   );
 
   const panViewportBy = React.useCallback(
@@ -1702,6 +1703,11 @@ export function Canvas() {
         return;
       }
 
+      if (!canEditBoard) {
+        showImagePasteNotice('error', 'This shared board is view-only');
+        return;
+      }
+
       if (!canvas) {
         showImagePasteNotice('error', 'Canvas is not ready yet');
         return;
@@ -1746,11 +1752,15 @@ export function Canvas() {
         showImagePasteNotice('error', 'Failed to place image on canvas');
       }
     },
-    [actorId, canvas, showImagePasteNotice]
+    [actorId, canEditBoard, canvas, showImagePasteNotice]
   );
 
   useEffect(() => {
     const handleImagePickerRequest = () => {
+      if (!canEditBoard) {
+        showImagePasteNotice('error', 'This shared board is view-only');
+        return;
+      }
       if (!canvas) {
         showImagePasteNotice('error', 'Canvas is not ready yet');
         return;
@@ -1762,7 +1772,7 @@ export function Canvas() {
     return () => {
       window.removeEventListener(OPEN_IMAGE_PICKER_EVENT, handleImagePickerRequest);
     };
-  }, [canvas, openImageFilePicker, showImagePasteNotice]);
+  }, [canEditBoard, canvas, openImageFilePicker, showImagePasteNotice]);
 
   useEffect(() => {
     return () => {
@@ -1775,16 +1785,17 @@ export function Canvas() {
   // Handle tool changes
   useEffect(() => {
     if (!canvas) return;
+    const toolForBehavior = canEditBoard ? activeTool : 'hand';
 
     // Reset canvas interaction mode
     canvas.isDrawingMode = false;
-    canvas.selection = true;
-    canvas.skipTargetFind = false;
-    applyCanvasCursors(canvas, activeTool);
+    canvas.selection = canEditBoard;
+    canvas.skipTargetFind = !canEditBoard;
+    applyCanvasCursors(canvas, toolForBehavior);
 
     let cleanup = () => {};
 
-    switch (activeTool) {
+    switch (toolForBehavior) {
       case 'select':
         // Default select mode
         canvas.selection = true;
@@ -1804,7 +1815,7 @@ export function Canvas() {
           lastX = (e.e as any).clientX;
           lastY = (e.e as any).clientY;
           stopPanInertia();
-          applyCanvasCursors(canvas, activeTool, { grabbing: true });
+          applyCanvasCursors(canvas, toolForBehavior, { grabbing: true });
         };
 
         const handleHandMouseMove = (e: fabric.TPointerEventInfo<fabric.TPointerEvent>) => {
@@ -1826,7 +1837,7 @@ export function Canvas() {
         const handleHandMouseUp = () => {
           isHandPanning = false;
           startPanInertia();
-          applyCanvasCursors(canvas, activeTool);
+          applyCanvasCursors(canvas, toolForBehavior);
         };
 
         canvas.on('mouse:down', handleHandMouseDown);
@@ -1876,7 +1887,7 @@ export function Canvas() {
       case 'arrow':
       case 'elbowArrow':
       case 'curvedArrow': {
-        const shapeTool: ShapeToolType = activeTool;
+        const shapeTool: ShapeToolType = toolForBehavior as ShapeToolType;
         // Shape mode should always draw, even when starting over an existing object.
         canvas.selection = false;
         canvas.skipTargetFind = true;
@@ -2047,6 +2058,7 @@ export function Canvas() {
   }, [
     activeTool,
     actorId,
+    canEditBoard,
     canvas,
     strokeColor,
     fillColor,
@@ -2063,7 +2075,7 @@ export function Canvas() {
 
   // Update brush settings when color/width changes
   useEffect(() => {
-    if (!canvas || activeTool !== 'pen' || !canvas.freeDrawingBrush) return;
+    if (!canEditBoard || !canvas || activeTool !== 'pen' || !canvas.freeDrawingBrush) return;
 
     canvas.freeDrawingBrush.color = strokeColor;
 
@@ -2073,7 +2085,7 @@ export function Canvas() {
     } else {
       canvas.freeDrawingBrush.width = strokeWidth;
     }
-  }, [canvas, activeTool, strokeColor, strokeWidth]);
+  }, [canEditBoard, canvas, activeTool, strokeColor, strokeWidth]);
 
   // Track selection state for contextual delete button
   useEffect(() => {
@@ -2127,6 +2139,10 @@ export function Canvas() {
 
   // Handle delete key - delete selected objects
   useEffect(() => {
+    if (!canEditBoard) {
+      return;
+    }
+
     const handleKeyDown = (event: KeyboardEvent) => {
       if ((event.key === 'Delete' || event.key === 'Backspace') && !isTextInputFocused()) {
         event.preventDefault();
@@ -2139,11 +2155,11 @@ export function Canvas() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [deleteActiveSelection]);
+  }, [canEditBoard, deleteActiveSelection]);
 
   // Handle clipboard image paste
   useEffect(() => {
-    if (!canvas) return;
+    if (!canvas || !canEditBoard) return;
 
     const handlePaste = async (event: ClipboardEvent) => {
       if (isTextInputFocused()) {
@@ -2245,7 +2261,7 @@ export function Canvas() {
     return () => {
       window.removeEventListener('paste', handlePaste);
     };
-  }, [actorId, canvas, setActiveTool, showImagePasteNotice]);
+  }, [actorId, canEditBoard, canvas, setActiveTool, showImagePasteNotice]);
 
   // Handle middle mouse button panning
   useEffect(() => {
@@ -2260,7 +2276,7 @@ export function Canvas() {
         lastPosYRef.current = (e.e as any).clientY;
         canvas.selection = false;
         stopPanInertia();
-        applyCanvasCursors(canvas, activeTool, { grabbing: true });
+        applyCanvasCursors(canvas, effectiveTool, { grabbing: true });
         if (containerRef.current) {
           containerRef.current.classList.add(styles.panning);
         }
@@ -2287,11 +2303,11 @@ export function Canvas() {
       if ((e.e as any).button === 1 && middleMousePanningRef.current) {
         middleMousePanningRef.current = false;
         startPanInertia();
-        canvas.selection = shouldEnableSelection(activeTool);
+        canvas.selection = canEditBoard && shouldEnableSelection(activeTool);
         if (spacebarPressedRef.current) {
-          applyCanvasCursors(canvas, activeTool, { panReady: true });
+          applyCanvasCursors(canvas, effectiveTool, { panReady: true });
         } else {
-          applyCanvasCursors(canvas, activeTool);
+          applyCanvasCursors(canvas, effectiveTool);
         }
         if (containerRef.current) {
           containerRef.current.classList.remove(styles.panning);
@@ -2319,7 +2335,7 @@ export function Canvas() {
       canvas.off('mouse:up', handleMiddleMouseUp);
       canvasElement.removeEventListener('mousedown', preventMiddleMouseDefault);
     };
-  }, [canvas, activeTool, stopPanInertia, recordPanPosition, startPanInertia]);
+  }, [canvas, canEditBoard, activeTool, effectiveTool, stopPanInertia, recordPanPosition, startPanInertia]);
 
   // Handle pan with spacebar + mouse drag
   useEffect(() => {
@@ -2331,7 +2347,7 @@ export function Canvas() {
         document.activeElement?.tagName !== 'TEXTAREA') {
         event.preventDefault();
         spacebarPressedRef.current = true;
-        applyCanvasCursors(canvas, activeTool, { panReady: true });
+        applyCanvasCursors(canvas, effectiveTool, { panReady: true });
         if (containerRef.current) {
           containerRef.current.classList.add(styles.panning);
         }
@@ -2342,7 +2358,7 @@ export function Canvas() {
       if (event.code === 'Space') {
         spacebarPressedRef.current = false;
         isPanningRef.current = false;
-        applyCanvasCursors(canvas, activeTool);
+        applyCanvasCursors(canvas, effectiveTool);
         if (containerRef.current) {
           containerRef.current.classList.remove(styles.panning);
         }
@@ -2356,7 +2372,7 @@ export function Canvas() {
         lastPosXRef.current = (event.e as any).clientX;
         lastPosYRef.current = (event.e as any).clientY;
         stopPanInertia();
-        applyCanvasCursors(canvas, activeTool, { grabbing: true });
+        applyCanvasCursors(canvas, effectiveTool, { grabbing: true });
       }
     };
 
@@ -2381,11 +2397,11 @@ export function Canvas() {
       if (isPanningRef.current) {
         isPanningRef.current = false;
         startPanInertia();
-        canvas.selection = shouldEnableSelection(activeTool);
+        canvas.selection = canEditBoard && shouldEnableSelection(activeTool);
         if (spacebarPressedRef.current) {
-          applyCanvasCursors(canvas, activeTool, { panReady: true });
+          applyCanvasCursors(canvas, effectiveTool, { panReady: true });
         } else {
-          applyCanvasCursors(canvas, activeTool);
+          applyCanvasCursors(canvas, effectiveTool);
         }
       }
     };
@@ -2403,7 +2419,7 @@ export function Canvas() {
       canvas.off('mouse:move', handleMouseMove);
       canvas.off('mouse:up', handleMouseUp);
     };
-  }, [canvas, activeTool, stopPanInertia, recordPanPosition, startPanInertia]);
+  }, [canvas, canEditBoard, activeTool, effectiveTool, stopPanInertia, recordPanPosition, startPanInertia]);
 
   // Handle Cmd/Ctrl + left-click drag panning
   useEffect(() => {
@@ -2418,7 +2434,7 @@ export function Canvas() {
         lastPosYRef.current = evt.clientY;
         canvas.selection = false;
         stopPanInertia();
-        applyCanvasCursors(canvas, activeTool, { grabbing: true });
+        applyCanvasCursors(canvas, effectiveTool, { grabbing: true });
         if (containerRef.current) {
           containerRef.current.classList.add(styles.panning);
         }
@@ -2445,8 +2461,8 @@ export function Canvas() {
       if (modifierPanningRef.current) {
         modifierPanningRef.current = false;
         startPanInertia();
-        canvas.selection = shouldEnableSelection(activeTool);
-        applyCanvasCursors(canvas, activeTool);
+        canvas.selection = canEditBoard && shouldEnableSelection(activeTool);
+        applyCanvasCursors(canvas, effectiveTool);
         if (containerRef.current) {
           containerRef.current.classList.remove(styles.panning);
         }
@@ -2462,7 +2478,7 @@ export function Canvas() {
       canvas.off('mouse:move', handleModifierMouseMove);
       canvas.off('mouse:up', handleModifierMouseUp);
     };
-  }, [canvas, activeTool, stopPanInertia, recordPanPosition, startPanInertia]);
+  }, [canvas, canEditBoard, activeTool, effectiveTool, stopPanInertia, recordPanPosition, startPanInertia]);
 
   // Handle trackpad/mouse wheel zoom (Cmd/Ctrl + scroll pans instead)
   useEffect(() => {
@@ -2573,6 +2589,9 @@ export function Canvas() {
 
       // Undo: Ctrl+Z (Windows/Linux) or Cmd+Z (Mac)
       if ((event.ctrlKey || event.metaKey) && key === 'z' && !event.shiftKey) {
+        if (!canEditBoard) {
+          return;
+        }
         event.preventDefault();
         undo();
         return;
@@ -2583,6 +2602,9 @@ export function Canvas() {
         ((event.ctrlKey || event.metaKey) && event.shiftKey && key === 'z') ||
         ((event.ctrlKey || event.metaKey) && key === 'y')
       ) {
+        if (!canEditBoard) {
+          return;
+        }
         event.preventDefault();
         redo();
         return;
@@ -2632,6 +2654,9 @@ export function Canvas() {
 
       // Typing with a sticky selected should start editing and replace placeholder text.
       if (selectedSticky && isPlainTypingKey(event)) {
+        if (!canEditBoard) {
+          return;
+        }
         event.preventDefault();
         handleStickyTypeKey(event.key);
         return;
@@ -2639,6 +2664,9 @@ export function Canvas() {
 
       // Edit selected sticky note: Enter
       if (!event.ctrlKey && !event.metaKey && event.key === 'Enter' && selectedSticky) {
+        if (!canEditBoard) {
+          return;
+        }
         event.preventDefault();
         handleStickyEdit();
         return;
@@ -2673,6 +2701,14 @@ export function Canvas() {
 
       // Tool shortcuts (only when not holding Ctrl/Cmd)
       if (!event.ctrlKey && !event.metaKey) {
+        if (!canEditBoard) {
+          if (event.key.toLowerCase() === 'h') {
+            event.preventDefault();
+            setActiveTool('hand');
+          }
+          return;
+        }
+
         switch (event.key.toLowerCase()) {
           case 'v':
             event.preventDefault();
@@ -2739,10 +2775,11 @@ export function Canvas() {
     selectedSticky,
     handleStickyEdit,
     handleStickyTypeKey,
+    canEditBoard,
   ]);
 
   return (
-    <div ref={containerRef} className={styles.container} style={canvasSizingStyle}>
+    <div ref={containerRef} className={styles.container}>
       <canvas ref={canvasRef} />
       <input
         ref={imageFileInputRef}
@@ -2760,13 +2797,13 @@ export function Canvas() {
         </div>
       )}
 
-      {activeTool === 'sticky' && (
+      {canEditBoard && activeTool === 'sticky' && (
         <div className={styles.modeHint} role="status" aria-live="polite">
           Pick a color, then click anywhere to place a sticky note.
         </div>
       )}
 
-      {activeTool === 'sticky' && (
+      {canEditBoard && activeTool === 'sticky' && (
         <div className={styles.stickyPlacementPalette} role="region" aria-label="Sticky note colors">
           <div className={styles.stickyPlacementGrid}>
             {STICKY_NOTE_COLORS.map((color) => (
@@ -2792,7 +2829,7 @@ export function Canvas() {
         <svg className={styles.remoteTrailLayer} aria-hidden="true">
           {remoteDrawingTrails.map((trail) => (
             <polyline
-              key={trail.userId}
+              key={trail.presenceId}
               points={trail.points}
               fill="none"
               stroke={trail.color}
@@ -2807,7 +2844,7 @@ export function Canvas() {
 
       {remoteCursors.map((presence) => (
         <div
-          key={presence.userId}
+          key={presence.sessionId ?? presence.userId}
           className={styles.remoteCursor}
           style={{
             left: `${presence.viewportX}px`,
@@ -2837,7 +2874,7 @@ export function Canvas() {
       )}
 
       {/* Contextual delete button */}
-      {hasSelection && (
+      {canEditBoard && hasSelection && (
         <button
           className={styles.deleteButton}
           onClick={handleDelete}

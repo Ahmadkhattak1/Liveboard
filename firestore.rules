@@ -1,0 +1,49 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidUserDoc(userId) {
+      return request.resource.data.keys().hasOnly([
+        'id',
+        'email',
+        'displayName',
+        'emoji',
+        'color',
+        'isAnonymous',
+        'createdBoards',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      request.resource.data.id == userId &&
+      (request.resource.data.email == null || request.resource.data.email is string) &&
+      request.resource.data.displayName is string &&
+      request.resource.data.displayName.size() > 0 &&
+      request.resource.data.displayName.size() <= 120 &&
+      request.resource.data.emoji is string &&
+      request.resource.data.emoji.size() > 0 &&
+      request.resource.data.emoji.size() <= 16 &&
+      request.resource.data.color is string &&
+      request.resource.data.color.size() > 0 &&
+      request.resource.data.color.size() <= 32 &&
+      request.resource.data.isAnonymous is bool &&
+      request.resource.data.createdBoards is list &&
+      request.resource.data.createdBoards.size() <= 1000 &&
+      request.resource.data.createdAt is int &&
+      request.resource.data.updatedAt is int;
+    }
+
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow list: if false;
+      allow create, update: if isOwner(userId) && isValidUserDoc(userId);
+      allow delete: if isOwner(userId);
+    }
+  }
+}

@@ -16,8 +16,9 @@ export const CANVAS_CONFIG = {
   defaultHeight: 1080,
   minWidth: parseInt(process.env.NEXT_PUBLIC_CANVAS_MIN_WIDTH || '900'),
   minHeight: parseInt(process.env.NEXT_PUBLIC_CANVAS_MIN_HEIGHT || '560'),
-  maxWidth: parseInt(process.env.NEXT_PUBLIC_CANVAS_MAX_WIDTH || '1800'),
-  maxHeight: parseInt(process.env.NEXT_PUBLIC_CANVAS_MAX_HEIGHT || '1000'),
+  // <= 0 means "no max constraint" and allows the canvas to fill large viewports.
+  maxWidth: parseInt(process.env.NEXT_PUBLIC_CANVAS_MAX_WIDTH || '0'),
+  maxHeight: parseInt(process.env.NEXT_PUBLIC_CANVAS_MAX_HEIGHT || '0'),
   minZoom: 0.1,
   maxZoom: 5,
   zoomStep: 0.1,

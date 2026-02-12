@@ -23,10 +23,17 @@ import {
 import { generateBoardId, generateShareCode } from '@/lib/utils/generateId';
 import { getRandomBoardEmoji } from '@/lib/constants/tools';
 import { normalizeShareCode } from '@/lib/utils/shareCode';
+import {
+  addCreatedBoardToUser,
+  getUserBoardIdsFromFirestore,
+  getUserProfileFromFirestore,
+  removeCreatedBoardFromUser,
+} from './userStore';
 
 interface BoardShareSettings {
   isPublic: boolean;
   shareCode: string | null;
+  allowSharedEditing: boolean;
 }
 
 function resolveBoardShareCode(value: unknown): string | null {
@@ -38,20 +45,23 @@ function resolveBoardShareCode(value: unknown): string | null {
   return normalizedCode.length > 0 ? normalizedCode : null;
 }
 
-function normalizeBoardIds(value: unknown): string[] {
-  if (Array.isArray(value)) {
-    return value.filter(
-      (item): item is string => typeof item === 'string' && item.length > 0
-    );
+function resolveAllowSharedEditing(value: unknown): boolean {
+  return value !== false;
+}
+
+function assertCollaborationAccess(
+  isAnonymous: boolean,
+  mode: 'share' | 'join'
+): void {
+  if (!isAnonymous) {
+    return;
   }
 
-  if (value && typeof value === 'object') {
-    return Object.values(value as Record<string, unknown>).filter(
-      (item): item is string => typeof item === 'string' && item.length > 0
-    );
+  if (mode === 'share') {
+    throw new Error('Sign in with Google to share boards.');
   }
 
-  return [];
+  throw new Error('Sign in with Google to join shared boards.');
 }
 
 function normalizePresenceMap(value: unknown): Record<string, UserPresence> {
@@ -60,12 +70,20 @@ function normalizePresenceMap(value: unknown): Record<string, UserPresence> {
   }
 
   return Object.entries(value as Record<string, unknown>).reduce<Record<string, UserPresence>>(
-    (accumulator, [userId, rawPresence]) => {
+    (accumulator, [presenceId, rawPresence]) => {
       if (!rawPresence || typeof rawPresence !== 'object') {
         return accumulator;
       }
 
       const presence = rawPresence as Partial<UserPresence>;
+      const presenceUserId =
+        typeof presence.userId === 'string' && presence.userId.length > 0
+          ? presence.userId
+          : presenceId;
+      const sessionId =
+        typeof presence.sessionId === 'string' && presence.sessionId.length > 0
+          ? presence.sessionId
+          : presenceId;
       const cursorX =
         typeof presence.cursor?.x === 'number' && Number.isFinite(presence.cursor.x)
           ? presence.cursor.x
@@ -89,8 +107,9 @@ function normalizePresenceMap(value: unknown): Record<string, UserPresence> {
               .map((point) => ({ x: point.x, y: point.y }))
           : [];
 
-      accumulator[userId] = {
-        userId,
+      accumulator[presenceId] = {
+        userId: presenceUserId,
+        sessionId,
         displayName: typeof presence.displayName === 'string' ? presence.displayName : 'Unknown',
         color: typeof presence.color === 'string' ? presence.color : '#2563EB',
         emoji: typeof presence.emoji === 'string' ? presence.emoji : '👤',
@@ -137,6 +156,7 @@ export async function createBoard(userId: string, title?: string): Promise<strin
       updatedAt: Date.now(),
       isPublic: false,
       shareCode: null,
+      allowSharedEditing: true,
     },
     canvas: {
       version: '6.0.0',
@@ -147,12 +167,7 @@ export async function createBoard(userId: string, title?: string): Promise<strin
   };
 
   await set(boardRef, boardData);
-
-  const userRef = ref(database, `users/${userId}/createdBoards`);
-  const userBoards = await get(userRef);
-  const boards = userBoards.exists() ? userBoards.val() : [];
-  boards.push(boardId);
-  await set(userRef, boards);
+  await addCreatedBoardToUser(userId, boardId);
 
   return boardId;
 }
@@ -202,17 +217,25 @@ async function resolveAvailableShareCode(
 export async function updateBoardSharing(
   boardId: string,
   ownerUserId: string,
-  isPublic: boolean
+  isPublic: boolean,
+  ownerIsAnonymous: boolean,
+  allowSharedEditing?: boolean
 ): Promise<BoardShareSettings> {
+  assertCollaborationAccess(ownerIsAnonymous, 'share');
   const board = await getOwnedBoard(boardId, ownerUserId);
   const rootRef = ref(database);
   const now = Date.now();
   const existingCode = resolveBoardShareCode(board.metadata.shareCode);
+  const nextAllowSharedEditing =
+    typeof allowSharedEditing === 'boolean'
+      ? allowSharedEditing
+      : resolveAllowSharedEditing(board.metadata.allowSharedEditing);
 
   if (!isPublic) {
     const updates: Record<string, unknown> = {
       [`boards/${boardId}/metadata/isPublic`]: false,
       [`boards/${boardId}/metadata/shareCode`]: null,
+      [`boards/${boardId}/metadata/allowSharedEditing`]: nextAllowSharedEditing,
       [`boards/${boardId}/metadata/updatedAt`]: now,
     };
     if (existingCode) {
@@ -224,6 +247,7 @@ export async function updateBoardSharing(
     return {
       isPublic: false,
       shareCode: null,
+      allowSharedEditing: nextAllowSharedEditing,
     };
   }
 
@@ -231,6 +255,7 @@ export async function updateBoardSharing(
   const updates: Record<string, unknown> = {
     [`boards/${boardId}/metadata/isPublic`]: true,
     [`boards/${boardId}/metadata/shareCode`]: shareCode,
+    [`boards/${boardId}/metadata/allowSharedEditing`]: nextAllowSharedEditing,
     [`boards/${boardId}/metadata/updatedAt`]: now,
     [`shareCodes/${shareCode}`]: boardId,
   };
@@ -243,10 +268,15 @@ export async function updateBoardSharing(
   return {
     isPublic: true,
     shareCode,
+    allowSharedEditing: nextAllowSharedEditing,
   };
 }
 
-export async function findPublicBoardByShareCode(code: string): Promise<string | null> {
+export async function findPublicBoardByShareCode(
+  code: string,
+  requesterIsAnonymous: boolean
+): Promise<string | null> {
+  assertCollaborationAccess(requesterIsAnonymous, 'join');
   const normalizedCode = normalizeShareCode(code);
   if (!normalizedCode) {
     return null;
@@ -255,29 +285,7 @@ export async function findPublicBoardByShareCode(code: string): Promise<string |
   const lookupRef = ref(database, `shareCodes/${normalizedCode}`);
   const lookupSnapshot = await get(lookupRef);
   if (!lookupSnapshot.exists()) {
-    const boardsRef = ref(database, 'boards');
-    const boardsSnapshot = await get(boardsRef);
-    if (!boardsSnapshot.exists()) {
-      return null;
-    }
-
-    const boards = boardsSnapshot.val() as Record<string, Board | undefined>;
-    const backfillMatch = Object.entries(boards).find(([, board]) => {
-      if (!board) {
-        return false;
-      }
-
-      const boardShareCode = resolveBoardShareCode(board.metadata.shareCode);
-      return board.metadata.isPublic && boardShareCode === normalizedCode;
-    });
-
-    if (!backfillMatch) {
-      return null;
-    }
-
-    const [backfilledBoardId] = backfillMatch;
-    await set(lookupRef, backfilledBoardId);
-    return backfilledBoardId;
+    return null;
   }
 
   const boardId = lookupSnapshot.val();
@@ -320,18 +328,7 @@ export async function deleteBoardForUser(
   }
 
   await remove(boardRef);
-
-  const userBoardsRef = ref(database, `users/${userId}/createdBoards`);
-  const userBoardsSnapshot = await get(userBoardsRef);
-
-  if (!userBoardsSnapshot.exists()) {
-    return;
-  }
-
-  const nextBoards = normalizeBoardIds(userBoardsSnapshot.val()).filter(
-    (id) => id !== boardId
-  );
-  await set(userBoardsRef, nextBoards);
+  await removeCreatedBoardFromUser(userId, boardId);
 }
 
 export async function getBoard(boardId: string): Promise<Board | null> {
@@ -343,6 +340,49 @@ export async function getBoard(boardId: string): Promise<Board | null> {
   }
 
   return snapshot.val() as Board;
+}
+
+export async function transferBoardOwnership(
+  sourceUserId: string,
+  targetUserId: string,
+  boardIds: string[]
+): Promise<void> {
+  if (sourceUserId === targetUserId) {
+    return;
+  }
+
+  const uniqueBoardIds = Array.from(
+    new Set(
+      boardIds.filter(
+        (boardId): boardId is string => typeof boardId === 'string' && boardId.length > 0
+      )
+    )
+  );
+
+  if (uniqueBoardIds.length === 0) {
+    return;
+  }
+
+  const now = Date.now();
+  await Promise.all(
+    uniqueBoardIds.map(async (boardId) => {
+      const boardMetadataRef = ref(database, `boards/${boardId}/metadata`);
+      const boardMetadataSnapshot = await get(boardMetadataRef);
+      if (!boardMetadataSnapshot.exists()) {
+        return;
+      }
+
+      const boardMetadata = boardMetadataSnapshot.val() as Partial<BoardMetadata>;
+      if (boardMetadata.createdBy !== sourceUserId) {
+        return;
+      }
+
+      await update(boardMetadataRef, {
+        createdBy: targetUserId,
+        updatedAt: now,
+      });
+    })
+  );
 }
 
 export async function updateBoardMetadata(
@@ -371,17 +411,18 @@ export async function saveBoardCanvasState(
   const objectCount = Array.isArray(sanitizedCanvasState.objects)
     ? sanitizedCanvasState.objects.length
     : 0;
-  const boardRef = ref(database, `boards/${boardId}`);
+  const canvasRef = ref(database, `boards/${boardId}/canvas`);
+  const metadataRef = ref(database, `boards/${boardId}/metadata`);
 
-  await update(boardRef, {
-    canvas: {
+  await Promise.all([
+    update(canvasRef, {
       ...sanitizedCanvasState,
       objectCount,
       updatedAt: now,
       updatedBy: userId,
-    },
-    'metadata/updatedAt': now,
-  });
+    }),
+    update(metadataRef, { updatedAt: now }),
+  ]);
 }
 
 export function subscribeToBoardCanvas(
@@ -406,22 +447,11 @@ export function subscribeToBoardCanvas(
 export async function getUserProfile(
   userId: string
 ): Promise<{ displayName: string; emoji: string; color: string } | null> {
-  const userRef = ref(database, `users/${userId}`);
-  const userSnapshot = await get(userRef);
+  return getUserProfileFromFirestore(userId);
+}
 
-  if (!userSnapshot.exists()) {
-    return null;
-  }
-
-  const rawUser = userSnapshot.val() as Record<string, unknown>;
-  return {
-    displayName:
-      typeof rawUser.displayName === 'string' && rawUser.displayName.trim().length > 0
-        ? rawUser.displayName
-        : 'Anonymous',
-    emoji: typeof rawUser.emoji === 'string' && rawUser.emoji.length > 0 ? rawUser.emoji : '👤',
-    color: typeof rawUser.color === 'string' && rawUser.color.length > 0 ? rawUser.color : '#2563EB',
-  };
+export async function getUserBoardIds(userId: string): Promise<string[]> {
+  return getUserBoardIdsFromFirestore(userId);
 }
 
 export async function addCanvasObject(
@@ -484,10 +514,10 @@ export async function getCanvasObjects(
 
 export async function updatePresence(
   boardId: string,
-  userId: string,
+  presenceId: string,
   presence: UserPresence
 ): Promise<void> {
-  const presenceRef = ref(database, `boards/${boardId}/presence/${userId}`);
+  const presenceRef = ref(database, `boards/${boardId}/presence/${presenceId}`);
   await set(presenceRef, presence);
 
   onDisconnect(presenceRef).remove();
@@ -495,10 +525,10 @@ export async function updatePresence(
 
 export async function updatePresenceFields(
   boardId: string,
-  userId: string,
+  presenceId: string,
   updates: Partial<UserPresence>
 ): Promise<void> {
-  const presenceRef = ref(database, `boards/${boardId}/presence/${userId}`);
+  const presenceRef = ref(database, `boards/${boardId}/presence/${presenceId}`);
   await update(presenceRef, {
     ...updates,
     lastSeen: Date.now(),
@@ -507,9 +537,9 @@ export async function updatePresenceFields(
 
 export async function removePresence(
   boardId: string,
-  userId: string
+  presenceId: string
 ): Promise<void> {
-  const presenceRef = ref(database, `boards/${boardId}/presence/${userId}`);
+  const presenceRef = ref(database, `boards/${boardId}/presence/${presenceId}`);
   await remove(presenceRef);
 }
 
@@ -571,46 +601,46 @@ export function subscribeToPresence(
   callback: (presence: Record<string, UserPresence>) => void
 ): () => void {
   const presenceRef = ref(database, `boards/${boardId}/presence`);
-  const presenceByUser: Record<string, UserPresence> = {};
+  const presenceBySession: Record<string, UserPresence> = {};
 
   const emitPresence = () => {
-    callback({ ...presenceByUser });
+    callback({ ...presenceBySession });
   };
 
-  const upsertPresence = (userId: string, rawPresence: unknown) => {
-    const normalized = normalizePresenceMap({ [userId]: rawPresence });
-    const nextPresence = normalized[userId];
+  const upsertPresence = (presenceId: string, rawPresence: unknown) => {
+    const normalized = normalizePresenceMap({ [presenceId]: rawPresence });
+    const nextPresence = normalized[presenceId];
     if (!nextPresence) {
       return;
     }
-    presenceByUser[userId] = nextPresence;
+    presenceBySession[presenceId] = nextPresence;
     emitPresence();
   };
 
   callback({});
 
   const addedUnsubscribe = onChildAdded(presenceRef, (snapshot) => {
-    const userId = snapshot.key;
-    if (!userId) {
+    const presenceId = snapshot.key;
+    if (!presenceId) {
       return;
     }
-    upsertPresence(userId, snapshot.val());
+    upsertPresence(presenceId, snapshot.val());
   });
 
   const changedUnsubscribe = onChildChanged(presenceRef, (snapshot) => {
-    const userId = snapshot.key;
-    if (!userId) {
+    const presenceId = snapshot.key;
+    if (!presenceId) {
       return;
     }
-    upsertPresence(userId, snapshot.val());
+    upsertPresence(presenceId, snapshot.val());
   });
 
   const removedUnsubscribe = onChildRemoved(presenceRef, (snapshot) => {
-    const userId = snapshot.key;
-    if (!userId || !(userId in presenceByUser)) {
+    const presenceId = snapshot.key;
+    if (!presenceId || !(presenceId in presenceBySession)) {
       return;
     }
-    delete presenceByUser[userId];
+    delete presenceBySession[presenceId];
     emitPresence();
   });
 

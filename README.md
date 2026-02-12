@@ -117,9 +117,11 @@ See `.env.local.example` for required environment variables.
    - Email/Password provider
    - Anonymous authentication
 3. Create Realtime Database:
-   - Start in test mode (configure rules later)
+   - Start in locked mode
 4. Enable Storage:
    - Set up for image uploads
+5. Deploy security rules:
+   - `npx firebase-tools deploy --only database,firestore:rules,storage`
 
 ## Scripts
 

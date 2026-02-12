@@ -1,0 +1,21 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function ownsImageFile(fileName) {
+      return fileName.matches('^' + request.auth.uid + '_.*');
+    }
+
+    match /images/{boardId}/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn()
+        && ownsImageFile(fileName)
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if isSignedIn() && ownsImageFile(fileName);
+    }
+  }
+}

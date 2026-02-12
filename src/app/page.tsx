@@ -3,7 +3,6 @@
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { get, ref } from 'firebase/database';
 import {
   FormEvent as ReactFormEvent,
   MouseEvent as ReactMouseEvent,
@@ -17,11 +16,16 @@ import {
   createBoard,
   deleteBoardForUser,
   findPublicBoardByShareCode,
+  getBoard,
+  getUserBoardIds,
   updateBoardEmoji,
   updateBoardSharing
 } from '@/lib/firebase/database';
-import { database } from '@/lib/firebase/config';
-import { loginAnonymously, loginWithGoogle } from '@/lib/firebase/auth';
+import {
+  loginAnonymously,
+  loginWithGoogle,
+  signOut as logoutUser
+} from '@/lib/firebase/auth';
 import { getRandomBoardEmoji } from '@/lib/constants/tools';
 import {
   formatShareCode,
@@ -29,7 +33,6 @@ import {
   normalizeShareCode
 } from '@/lib/utils/shareCode';
 import { Loader } from '@/components/ui/Loader';
-import { Board } from '@/types/board';
 import styles from './page.module.css';
 import { EmojiStyle, type EmojiClickData } from 'emoji-picker-react';
 
@@ -42,22 +45,7 @@ interface BoardSummary {
   updatedAt: number;
   isPublic: boolean;
   shareCode: string | null;
-}
-
-function normalizeBoardIds(value: unknown): string[] {
-  if (Array.isArray(value)) {
-    return value.filter(
-      (item): item is string => typeof item === 'string' && item.length > 0
-    );
-  }
-
-  if (value && typeof value === 'object') {
-    return Object.values(value as Record<string, unknown>).filter(
-      (item): item is string => typeof item === 'string' && item.length > 0
-    );
-  }
-
-  return [];
+  allowSharedEditing: boolean;
 }
 
 function resolveBoardShareCode(value: unknown): string | null {
@@ -67,6 +55,10 @@ function resolveBoardShareCode(value: unknown): string | null {
 
   const normalized = normalizeShareCode(value);
   return normalized.length > 0 ? normalized : null;
+}
+
+function resolveAllowSharedEditing(value: unknown): boolean {
+  return value !== false;
 }
 
 function formatUpdatedTime(timestamp: number): string {
@@ -118,7 +110,14 @@ function parseErrorMessage(error: unknown, fallback: string): string {
   }
 
   if (message.includes('permission')) {
-    return 'Database permission denied. Check your Firebase Realtime Database rules.';
+    return 'Database permission denied. Check your Firestore and Realtime Database rules.';
+  }
+
+  if (
+    message.includes('client is offline') ||
+    message.includes('offline')
+  ) {
+    return 'You are offline. Reconnect to sync your latest data.';
   }
 
   return message;
@@ -159,6 +158,7 @@ export default function HomePage() {
   const [initializing, setInitializing] = useState(true);
   const [loadingBoards, setLoadingBoards] = useState(false);
   const [signingIn, setSigningIn] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const [creatingBoard, setCreatingBoard] = useState(false);
   const [joiningBoardByCode, setJoiningBoardByCode] = useState(false);
   const [emojiModalBoardId, setEmojiModalBoardId] = useState<string | null>(null);
@@ -168,13 +168,16 @@ export default function HomePage() {
   const [copiedShareCodeBoardId, setCopiedShareCodeBoardId] = useState<string | null>(null);
   const [edgeActionBoardId, setEdgeActionBoardId] = useState<string | null>(null);
   const [deletingBoardId, setDeletingBoardId] = useState<string | null>(null);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [authAction, setAuthAction] = useState<'anonymous' | 'google' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const edgeRevealTimeoutRef = useRef<number | null>(null);
   const edgeRevealBoardRef = useRef<string | null>(null);
   const edgeHideTimeoutRef = useRef<number | null>(null);
   const edgeHideBoardRef = useRef<string | null>(null);
+  const profileMenuRef = useRef<HTMLDivElement | null>(null);
   const hasModalOpen = Boolean(emojiModalBoardId || shareModalBoardId);
+  const isAnonymousUser = Boolean(user?.isAnonymous);
 
   useEffect(() => {
     if (!hasModalOpen) {
@@ -246,16 +249,52 @@ export default function HomePage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!profileMenuOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!(event.target instanceof Node)) {
+        return;
+      }
+
+      if (profileMenuRef.current?.contains(event.target)) {
+        return;
+      }
+
+      setProfileMenuOpen(false);
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setProfileMenuOpen(false);
+      }
+    };
+
+    window.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleEscape);
+
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleEscape);
+    };
+  }, [profileMenuOpen]);
+
+  useEffect(() => {
+    if (user?.id) {
+      return;
+    }
+
+    setProfileMenuOpen(false);
+  }, [user?.id]);
+
   const loadBoards = useCallback(async (userId: string) => {
     setLoadingBoards(true);
     setError(null);
 
     try {
-      const userBoardsRef = ref(database, `users/${userId}/createdBoards`);
-      const userBoardsSnapshot = await get(userBoardsRef);
-      const boardIds = userBoardsSnapshot.exists()
-        ? normalizeBoardIds(userBoardsSnapshot.val())
-        : [];
+      const boardIds = await getUserBoardIds(userId);
       const uniqueBoardIds = Array.from(new Set(boardIds));
 
       if (uniqueBoardIds.length === 0) {
@@ -265,14 +304,10 @@ export default function HomePage() {
 
       const boardSummaries = await Promise.all(
         uniqueBoardIds.map(async (boardId) => {
-          const boardRef = ref(database, `boards/${boardId}`);
-          const boardSnapshot = await get(boardRef);
-
-          if (!boardSnapshot.exists()) {
+          const board = await getBoard(boardId);
+          if (!board) {
             return null;
           }
-
-          const board = boardSnapshot.val() as Board;
           const randomEmoji = getRandomBoardEmoji();
           const emoji = board.metadata.emoji || randomEmoji;
 
@@ -291,6 +326,7 @@ export default function HomePage() {
             updatedAt: board.metadata.updatedAt || board.metadata.createdAt,
             isPublic: Boolean(board.metadata.isPublic),
             shareCode: resolveBoardShareCode(board.metadata.shareCode),
+            allowSharedEditing: resolveAllowSharedEditing(board.metadata.allowSharedEditing),
           };
         })
       );
@@ -339,6 +375,7 @@ export default function HomePage() {
       return;
     }
 
+    setProfileMenuOpen(false);
     setSigningIn(true);
     setAuthAction(mode);
     setError(null);
@@ -356,6 +393,25 @@ export default function HomePage() {
       setSigningIn(false);
       setAuthAction(null);
       setInitializing(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    if (signingOut) {
+      return;
+    }
+
+    setProfileMenuOpen(false);
+    setSigningOut(true);
+    setError(null);
+
+    try {
+      await logoutUser();
+    } catch (signOutError: unknown) {
+      console.error('Sign-out error:', signOutError);
+      setError(parseErrorMessage(signOutError, 'Failed to sign out'));
+    } finally {
+      setSigningOut(false);
     }
   };
 
@@ -389,6 +445,11 @@ export default function HomePage() {
   const handleJoinBoardByCode = async (event: ReactFormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
+    if (isAnonymousUser) {
+      setError('Sign in with Google to join shared boards.');
+      return;
+    }
+
     const normalizedCode = normalizeShareCode(joinCodeInput);
     if (!normalizedCode) {
       setError('Enter a valid share code.');
@@ -403,7 +464,7 @@ export default function HomePage() {
     setError(null);
 
     try {
-      const boardId = await findPublicBoardByShareCode(normalizedCode);
+      const boardId = await findPublicBoardByShareCode(normalizedCode, isAnonymousUser);
       if (!boardId) {
         setError('No public board found for that share code.');
         return;
@@ -445,6 +506,12 @@ export default function HomePage() {
     event: ReactMouseEvent<HTMLButtonElement>
   ) => {
     event.stopPropagation();
+
+    if (isAnonymousUser) {
+      setError('Sign in with Google to share boards.');
+      return;
+    }
+
     setError(null);
     setCopiedShareCodeBoardId(null);
     setShareModalBoardId(boardId);
@@ -461,8 +528,14 @@ export default function HomePage() {
 
   const handleUpdateBoardSharing = async (
     boardId: string,
-    nextPublicState: boolean
+    nextPublicState: boolean,
+    nextAllowSharedEditing?: boolean
   ) => {
+    if (isAnonymousUser) {
+      setError('Sign in with Google to share boards.');
+      return;
+    }
+
     if (!activeUserId || updatingShareBoardId) {
       return;
     }
@@ -474,7 +547,9 @@ export default function HomePage() {
       const sharingState = await updateBoardSharing(
         boardId,
         activeUserId,
-        nextPublicState
+        nextPublicState,
+        isAnonymousUser,
+        nextAllowSharedEditing
       );
 
       setBoards((currentBoards) =>
@@ -484,6 +559,7 @@ export default function HomePage() {
                 ...board,
                 isPublic: sharingState.isPublic,
                 shareCode: sharingState.shareCode,
+                allowSharedEditing: sharingState.allowSharedEditing,
               }
             : board
         )
@@ -749,6 +825,7 @@ export default function HomePage() {
   const showInitialLoader =
     loading ||
     signingIn ||
+    signingOut ||
     (Boolean(user?.id) && initializing && boards.length === 0);
 
   if (showInitialLoader) {
@@ -757,7 +834,11 @@ export default function HomePage() {
         <div className={styles.loadingContent}>
           <Loader size="lg" />
           <p className={styles.loadingText}>
-            {authAction === 'google' ? 'Signing in with Google...' : 'Loading your boards...'}
+            {signingOut
+              ? 'Signing out...'
+              : authAction === 'google'
+                ? 'Signing in with Google...'
+                : 'Loading your boards...'}
           </p>
         </div>
       </div>
@@ -812,11 +893,60 @@ export default function HomePage() {
         </button>
       </div>
 
-      <div className={styles.profileIsland}>
-        <span className={styles.profileName}>{user?.displayName || 'Anonymous'}</span>
-        <span className={styles.profileType}>
-          {user?.isAnonymous ? 'Guest profile' : 'Google profile'}
-        </span>
+      <div className={styles.profileIsland} ref={profileMenuRef}>
+        <button
+          type="button"
+          className={styles.profileTriggerButton}
+          onClick={() => {
+            setProfileMenuOpen((current) => !current);
+          }}
+          aria-haspopup="menu"
+          aria-expanded={profileMenuOpen}
+          aria-controls="profile-menu"
+        >
+          <span className={styles.profileIdentity}>
+            <span className={styles.profileName}>{user?.displayName || 'Anonymous'}</span>
+            <span className={styles.profileType}>
+              {user?.isAnonymous ? 'Guest profile' : 'Google profile'}
+            </span>
+          </span>
+          <span className={styles.profileChevron} aria-hidden="true">
+            {profileMenuOpen ? '▴' : '▾'}
+          </span>
+        </button>
+        {profileMenuOpen && (
+          <div
+            id="profile-menu"
+            className={styles.profileDropdown}
+            role="menu"
+            aria-label="Profile actions"
+          >
+            {isAnonymousUser && (
+              <button
+                type="button"
+                className={`${styles.profileDropdownButton} ${styles.profileDropdownPrimary}`}
+                onClick={() => {
+                  void handleAuthChoice('google');
+                }}
+                role="menuitem"
+                disabled={signingIn || signingOut}
+              >
+                Sign in with Google
+              </button>
+            )}
+            <button
+              type="button"
+              className={styles.profileDropdownButton}
+              onClick={() => {
+                void handleSignOut();
+              }}
+              role="menuitem"
+              disabled={signingOut}
+            >
+              {signingOut ? 'Signing out...' : 'Sign out'}
+            </button>
+          </div>
+        )}
       </div>
 
       <main className={styles.main}>
@@ -837,7 +967,9 @@ export default function HomePage() {
         <section className={styles.joinPanel}>
           <h2 className={styles.joinTitle}>Open a shared board</h2>
           <p className={styles.joinText}>
-            Enter the access code from the board owner.
+            {isAnonymousUser
+              ? 'Guest profiles cannot join shared boards. Sign in with Google to continue.'
+              : 'Enter the access code from the board owner.'}
           </p>
           <form className={styles.joinForm} onSubmit={(event) => {
             void handleJoinBoardByCode(event);
@@ -854,15 +986,31 @@ export default function HomePage() {
               maxLength={8}
               autoComplete="off"
               spellCheck={false}
+              disabled={isAnonymousUser || joiningBoardByCode}
             />
             <button
               type="submit"
               className={styles.joinButton}
-              disabled={joiningBoardByCode || joinCodeInput.trim().length === 0}
+              disabled={
+                isAnonymousUser ||
+                joiningBoardByCode ||
+                joinCodeInput.trim().length === 0
+              }
             >
               {joiningBoardByCode ? 'Joining...' : 'Join board'}
             </button>
           </form>
+          {isAnonymousUser && (
+            <button
+              type="button"
+              className={styles.joinUpgradeButton}
+              onClick={() => {
+                void handleAuthChoice('google');
+              }}
+            >
+              Sign in with Google to join boards
+            </button>
+          )}
         </section>
 
         {boards.length === 0 ? (
@@ -940,8 +1088,12 @@ export default function HomePage() {
                       onClick={(event) => {
                         handleShareBoard(board.id, event);
                       }}
-                      data-tooltip="Share"
-                      aria-label={`Share ${board.title}`}
+                      data-tooltip={isAnonymousUser ? 'Sign in to share' : 'Share'}
+                      aria-label={
+                        isAnonymousUser
+                          ? `Sign in with Google to share ${board.title}`
+                          : `Share ${board.title}`
+                      }
                     >
                       ↗
                     </button>
@@ -1037,7 +1189,7 @@ export default function HomePage() {
 
             <div className={styles.shareModalBody}>
               <p className={styles.shareModalText}>
-                Make this board public to generate an access code.
+                Make this board public to generate an access code and control whether guests can edit.
               </p>
 
               <button
@@ -1046,7 +1198,8 @@ export default function HomePage() {
                 onClick={() => {
                   void handleUpdateBoardSharing(
                     shareModalBoard.id,
-                    !shareModalBoard.isPublic
+                    !shareModalBoard.isPublic,
+                    shareModalBoard.allowSharedEditing
                   );
                 }}
                 disabled={isUpdatingShareSettings}
@@ -1057,6 +1210,37 @@ export default function HomePage() {
                     ? 'Public (click to make private)'
                     : 'Private (click to make public)'}
               </button>
+
+              {shareModalBoard.isPublic && (
+                <>
+                  <button
+                    type="button"
+                    className={`${styles.shareEditPermissionButton} ${
+                      shareModalBoard.allowSharedEditing
+                        ? styles.shareEditPermissionEnabled
+                        : styles.shareEditPermissionDisabled
+                    }`}
+                    onClick={() => {
+                      void handleUpdateBoardSharing(
+                        shareModalBoard.id,
+                        true,
+                        !shareModalBoard.allowSharedEditing
+                      );
+                    }}
+                    disabled={isUpdatingShareSettings}
+                  >
+                    {isUpdatingShareSettings
+                      ? 'Updating...'
+                      : shareModalBoard.allowSharedEditing
+                        ? 'Guests can edit (click to make view-only)'
+                        : 'Guests view-only (click to allow editing)'}
+                  </button>
+                  <p className={styles.shareEditPermissionHint}>
+                    Owners can always edit. This setting applies to anyone joining with the share
+                    code.
+                  </p>
+                </>
+              )}
 
               {shareModalBoard.isPublic && shareModalCode && (
                 <div className={styles.shareCodePanel}>

@@ -1,0 +1,64 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "boards": {
+      "$boardId": {
+        ".read": "auth != null && (data.child('metadata/createdBy').val() === auth.uid || (auth.token.firebase.sign_in_provider != 'anonymous' && data.child('metadata/isPublic').val() === true))",
+        ".write": "auth != null && ((!data.exists() && newData.child('metadata/createdBy').val() === auth.uid && newData.child('metadata/id').val() === $boardId) || data.child('metadata/createdBy').val() === auth.uid)",
+        "metadata": {
+          ".write": "auth != null && data.parent().child('metadata/createdBy').val() === auth.uid",
+          "id": {
+            ".validate": "newData.isString() && newData.val() === $boardId"
+          },
+          "title": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 200"
+          },
+          "emoji": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 16"
+          },
+          "createdAt": {
+            ".validate": "newData.isNumber()"
+          },
+          "createdBy": {
+            ".validate": "newData.isString() && newData.val().length > 0"
+          },
+          "updatedAt": {
+            ".write": "auth != null && (data.parent().child('createdBy').val() === auth.uid || (auth.token.firebase.sign_in_provider != 'anonymous' && data.parent().child('isPublic').val() === true && data.parent().child('allowSharedEditing').val() !== false))",
+            ".validate": "newData.isNumber()"
+          },
+          "isPublic": {
+            ".validate": "newData.isBoolean()"
+          },
+          "shareCode": {
+            ".validate": "newData.val() === null || (newData.isString() && newData.val().matches(/^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{8}$/))"
+          },
+          "allowSharedEditing": {
+            ".validate": "newData.isBoolean()"
+          }
+        },
+        "canvas": {
+          ".write": "auth != null && (data.parent().child('metadata/createdBy').val() === auth.uid || (auth.token.firebase.sign_in_provider != 'anonymous' && data.parent().child('metadata/isPublic').val() === true && data.parent().child('metadata/allowSharedEditing').val() !== false))"
+        },
+        "presence": {
+          "$presenceId": {
+            ".write": "auth != null && (data.parent().parent().child('metadata/createdBy').val() === auth.uid || (auth.token.firebase.sign_in_provider != 'anonymous' && data.parent().parent().child('metadata/isPublic').val() === true))"
+          }
+        }
+      }
+    },
+    "shareCodes": {
+      "$code": {
+        ".read": "auth != null && auth.token.firebase.sign_in_provider != 'anonymous'",
+        ".write": "auth != null && auth.token.firebase.sign_in_provider != 'anonymous' && ((newData.val() === null && (!data.exists() || (data.isString() && newData.root.child('boards/' + data.val() + '/metadata/createdBy').val() === auth.uid))) || (newData.isString() && newData.val().length > 0 && newData.root.child('boards/' + newData.val() + '/metadata/createdBy').val() === auth.uid && newData.root.child('boards/' + newData.val() + '/metadata/isPublic').val() === true && newData.root.child('boards/' + newData.val() + '/metadata/shareCode').val() === $code))",
+        ".validate": "newData.val() === null || ($code.matches(/^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{8}$/) && newData.isString() && newData.val().length > 0)"
+      }
+    },
+    "users": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    }
+  }
+}

@@ -11,6 +11,8 @@ import {
 
 interface BoardContextType {
   board: Board | null;
+  isOwner: boolean;
+  canEdit: boolean;
   loading: boolean;
   error: string | null;
   refreshBoard: () => Promise<void>;
@@ -23,12 +25,32 @@ interface BoardProviderProps {
   children: React.ReactNode;
 }
 
-function getBoardErrorMessage(boardData: Board): string {
+function getBoardErrorMessage(
+  boardData: Board,
+  hasUser: boolean,
+  isAnonymousUser: boolean
+): string {
+  if (isAnonymousUser) {
+    return 'Sign in with Google to join shared boards.';
+  }
+
+  if (!hasUser) {
+    return 'Sign in to open this board.';
+  }
+
   if (boardData.metadata.isPublic) {
     return 'Access code required. Enter the code on the home page and try again.';
   }
 
   return 'This board is private.';
+}
+
+function canCurrentUserEditBoard(boardData: Board, currentUserId: string | null): boolean {
+  if (currentUserId && boardData.metadata.createdBy === currentUserId) {
+    return true;
+  }
+
+  return boardData.metadata.isPublic && boardData.metadata.allowSharedEditing !== false;
 }
 
 export function BoardProvider({ boardId, children }: BoardProviderProps) {
@@ -45,6 +67,10 @@ export function BoardProvider({ boardId, children }: BoardProviderProps) {
     const currentUserId = user?.id ?? null;
     if (currentUserId && boardData.metadata.createdBy === currentUserId) {
       return true;
+    }
+
+    if (!currentUserId || user?.isAnonymous) {
+      return false;
     }
 
     if (!boardData.metadata.isPublic) {
@@ -76,7 +102,7 @@ export function BoardProvider({ boardId, children }: BoardProviderProps) {
     }
 
     return isAuthorized;
-  }, [boardId, user?.id]);
+  }, [boardId, user?.id, user?.isAnonymous]);
 
   const loadBoardWithAccessCheck = useCallback(async (): Promise<BoardAccessResult> => {
     const boardData = await getBoard(boardId);
@@ -85,11 +111,18 @@ export function BoardProvider({ boardId, children }: BoardProviderProps) {
     }
 
     if (!canAccessBoard(boardData)) {
-      return { allowed: false, message: getBoardErrorMessage(boardData) };
+      return {
+        allowed: false,
+        message: getBoardErrorMessage(
+          boardData,
+          Boolean(user?.id),
+          Boolean(user?.isAnonymous)
+        ),
+      };
     }
 
     return { allowed: true, board: boardData };
-  }, [boardId, canAccessBoard]);
+  }, [boardId, canAccessBoard, user?.id, user?.isAnonymous]);
 
   useEffect(() => {
     if (authLoading) {
@@ -153,8 +186,16 @@ export function BoardProvider({ boardId, children }: BoardProviderProps) {
     }
   };
 
+  const currentUserId = user?.id ?? null;
+  const isOwner = Boolean(
+    board &&
+    currentUserId &&
+    board.metadata.createdBy === currentUserId
+  );
+  const canEdit = board ? canCurrentUserEditBoard(board, currentUserId) : false;
+
   return (
-    <BoardContext.Provider value={{ board, loading, error, refreshBoard }}>
+    <BoardContext.Provider value={{ board, isOwner, canEdit, loading, error, refreshBoard }}>
       {children}
     </BoardContext.Provider>
   );
