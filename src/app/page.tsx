@@ -90,6 +90,20 @@ function formatUpdatedTime(timestamp: number): string {
   }).format(new Date(timestamp));
 }
 
+function getStableIndexFromString(value: string, modulo: number): number {
+  if (modulo <= 0) {
+    return 0;
+  }
+
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0) % modulo;
+}
+
 function parseErrorMessage(error: unknown, fallback: string): string {
   const message = error instanceof Error ? error.message : fallback;
 
@@ -171,6 +185,7 @@ export default function HomePage() {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [authAction, setAuthAction] = useState<'anonymous' | 'google' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [signInPromptMessage, setSignInPromptMessage] = useState<string | null>(null);
   const edgeRevealTimeoutRef = useRef<number | null>(null);
   const edgeRevealBoardRef = useRef<string | null>(null);
   const edgeHideTimeoutRef = useRef<number | null>(null);
@@ -289,6 +304,12 @@ export default function HomePage() {
     setProfileMenuOpen(false);
   }, [user?.id]);
 
+  useEffect(() => {
+    if (!isAnonymousUser) {
+      setSignInPromptMessage(null);
+    }
+  }, [isAnonymousUser]);
+
   const loadBoards = useCallback(async (userId: string) => {
     setLoadingBoards(true);
     setError(null);
@@ -376,6 +397,7 @@ export default function HomePage() {
     }
 
     setProfileMenuOpen(false);
+    setSignInPromptMessage(null);
     setSigningIn(true);
     setAuthAction(mode);
     setError(null);
@@ -446,10 +468,12 @@ export default function HomePage() {
     event.preventDefault();
 
     if (isAnonymousUser) {
-      setError('Sign in with Google to join shared boards.');
+      setError(null);
+      setSignInPromptMessage('Sign in with Google to join shared boards.');
       return;
     }
 
+    setSignInPromptMessage(null);
     const normalizedCode = normalizeShareCode(joinCodeInput);
     if (!normalizedCode) {
       setError('Enter a valid share code.');
@@ -508,10 +532,12 @@ export default function HomePage() {
     event.stopPropagation();
 
     if (isAnonymousUser) {
-      setError('Sign in with Google to share boards.');
+      setError(null);
+      setSignInPromptMessage('Sign in with Google to share boards.');
       return;
     }
 
+    setSignInPromptMessage(null);
     setError(null);
     setCopiedShareCodeBoardId(null);
     setShareModalBoardId(boardId);
@@ -532,10 +558,12 @@ export default function HomePage() {
     nextAllowSharedEditing?: boolean
   ) => {
     if (isAnonymousUser) {
-      setError('Sign in with Google to share boards.');
+      setError(null);
+      setSignInPromptMessage('Sign in with Google to share boards.');
       return;
     }
 
+    setSignInPromptMessage(null);
     if (!activeUserId || updatingShareBoardId) {
       return;
     }
@@ -880,6 +908,15 @@ export default function HomePage() {
     );
   }
 
+  const boardToneClasses = [
+    styles.toneBlue,
+    styles.toneYellow,
+    styles.toneTeal,
+    styles.toneCoral,
+    styles.toneMint,
+    styles.toneLavender,
+  ];
+
   return (
     <div className={styles.page}>
       <div className={styles.actionIsland}>
@@ -950,6 +987,34 @@ export default function HomePage() {
       </div>
 
       <main className={styles.main}>
+        {signInPromptMessage && (
+          <div className={styles.shareSignInBanner}>
+            <p>{signInPromptMessage}</p>
+            <div className={styles.shareSignInActions}>
+              <button
+                type="button"
+                className={styles.shareSignInButton}
+                onClick={() => {
+                  void handleAuthChoice('google');
+                }}
+                disabled={signingIn || signingOut}
+              >
+                Sign in with Google
+              </button>
+              <button
+                type="button"
+                className={styles.shareSignInDismissButton}
+                onClick={() => {
+                  setSignInPromptMessage(null);
+                }}
+                disabled={signingIn || signingOut}
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
         {error && (
           <div className={styles.errorBanner}>
             <p>{error}</p>
@@ -966,11 +1031,7 @@ export default function HomePage() {
 
         <section className={styles.joinPanel}>
           <h2 className={styles.joinTitle}>Open a shared board</h2>
-          <p className={styles.joinText}>
-            {isAnonymousUser
-              ? 'Guest profiles cannot join shared boards. Sign in with Google to continue.'
-              : 'Enter the access code from the board owner.'}
-          </p>
+          <p className={styles.joinText}>Enter the access code from the board owner.</p>
           <form className={styles.joinForm} onSubmit={(event) => {
             void handleJoinBoardByCode(event);
           }}>
@@ -986,13 +1047,12 @@ export default function HomePage() {
               maxLength={8}
               autoComplete="off"
               spellCheck={false}
-              disabled={isAnonymousUser || joiningBoardByCode}
+              disabled={joiningBoardByCode}
             />
             <button
               type="submit"
               className={styles.joinButton}
               disabled={
-                isAnonymousUser ||
                 joiningBoardByCode ||
                 joinCodeInput.trim().length === 0
               }
@@ -1000,17 +1060,6 @@ export default function HomePage() {
               {joiningBoardByCode ? 'Joining...' : 'Join board'}
             </button>
           </form>
-          {isAnonymousUser && (
-            <button
-              type="button"
-              className={styles.joinUpgradeButton}
-              onClick={() => {
-                void handleAuthChoice('google');
-              }}
-            >
-              Sign in with Google to join boards
-            </button>
-          )}
         </section>
 
         {boards.length === 0 ? (
@@ -1030,12 +1079,10 @@ export default function HomePage() {
           </section>
         ) : (
           <section className={styles.cardStack}>
-            {boards.map((board, index) => {
-              const toneClass = index % 3 === 0
-                ? styles.toneBlue
-                : index % 3 === 1
-                  ? styles.toneYellow
-                  : styles.toneTeal;
+            {boards.map((board) => {
+              const toneClass = boardToneClasses[
+                getStableIndexFromString(board.id, boardToneClasses.length)
+              ];
               const isEdgeActionVisible = edgeActionBoardId === board.id;
               const isDeletingBoard = deletingBoardId === board.id;
 
@@ -1121,6 +1168,22 @@ export default function HomePage() {
         )}
       </main>
 
+      <div className={styles.infoFab}>
+        <button
+          type="button"
+          className={styles.infoFabButton}
+          aria-label="What is this?"
+        >
+          ?
+        </button>
+        <div className={styles.infoPopover} role="note">
+          <p className={styles.infoPopoverQuestion}>What is this?</p>
+          <p className={styles.infoPopoverAnswer}>
+            Liveboard is a freeform whiteboard to share ideas with teams or students
+          </p>
+        </div>
+      </div>
+
       {emojiModalBoardId && (
         <div className={styles.emojiModalBackdrop} onClick={handleCloseEmojiModal}>
           <div
@@ -1192,55 +1255,68 @@ export default function HomePage() {
                 Make this board public to generate an access code and control whether guests can edit.
               </p>
 
-              <button
-                type="button"
-                className={`${styles.shareVisibilityButton} ${shareModalBoard.isPublic ? styles.shareVisibilityPublic : styles.shareVisibilityPrivate}`}
-                onClick={() => {
-                  void handleUpdateBoardSharing(
-                    shareModalBoard.id,
-                    !shareModalBoard.isPublic,
-                    shareModalBoard.allowSharedEditing
-                  );
-                }}
-                disabled={isUpdatingShareSettings}
-              >
-                {isUpdatingShareSettings
-                  ? 'Updating...'
-                  : shareModalBoard.isPublic
-                    ? 'Public (click to make private)'
-                    : 'Private (click to make public)'}
-              </button>
-
-              {shareModalBoard.isPublic && (
-                <>
-                  <button
-                    type="button"
-                    className={`${styles.shareEditPermissionButton} ${
+              <div className={styles.shareChecklist}>
+                <button
+                  type="button"
+                  className={styles.shareCheckRow}
+                  onClick={() => {
+                    void handleUpdateBoardSharing(
+                      shareModalBoard.id,
+                      !shareModalBoard.isPublic,
                       shareModalBoard.allowSharedEditing
-                        ? styles.shareEditPermissionEnabled
-                        : styles.shareEditPermissionDisabled
-                    }`}
-                    onClick={() => {
-                      void handleUpdateBoardSharing(
-                        shareModalBoard.id,
-                        true,
-                        !shareModalBoard.allowSharedEditing
-                      );
-                    }}
-                    disabled={isUpdatingShareSettings}
+                    );
+                  }}
+                  disabled={isUpdatingShareSettings}
+                >
+                  <span
+                    className={`${styles.shareCheckMark} ${shareModalBoard.isPublic ? styles.shareCheckMarkActive : ''}`}
+                    aria-hidden="true"
                   >
-                    {isUpdatingShareSettings
-                      ? 'Updating...'
-                      : shareModalBoard.allowSharedEditing
-                        ? 'Guests can edit (click to make view-only)'
-                        : 'Guests view-only (click to allow editing)'}
-                  </button>
-                  <p className={styles.shareEditPermissionHint}>
-                    Owners can always edit. This setting applies to anyone joining with the share
-                    code.
-                  </p>
-                </>
-              )}
+                    {shareModalBoard.isPublic ? '✓' : ''}
+                  </span>
+                  <span className={styles.shareCheckContent}>
+                    <span className={styles.shareCheckLabel}>Public sharing</span>
+                    <span className={styles.shareCheckHint}>
+                      Anyone with the access code can open this board.
+                    </span>
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  className={styles.shareCheckRow}
+                  onClick={() => {
+                    if (!shareModalBoard.isPublic) {
+                      return;
+                    }
+                    void handleUpdateBoardSharing(
+                      shareModalBoard.id,
+                      true,
+                      !shareModalBoard.allowSharedEditing
+                    );
+                  }}
+                  disabled={!shareModalBoard.isPublic || isUpdatingShareSettings}
+                >
+                  <span
+                    className={`${styles.shareCheckMark} ${
+                      shareModalBoard.isPublic && shareModalBoard.allowSharedEditing
+                        ? styles.shareCheckMarkActive
+                        : ''
+                    }`}
+                    aria-hidden="true"
+                  >
+                    {shareModalBoard.isPublic && shareModalBoard.allowSharedEditing ? '✓' : ''}
+                  </span>
+                  <span className={styles.shareCheckContent}>
+                    <span className={styles.shareCheckLabel}>Allow guest editing</span>
+                    <span className={styles.shareCheckHint}>
+                      {shareModalBoard.isPublic
+                        ? 'Guests can draw and edit when this is checked.'
+                        : 'Enable public sharing first.'}
+                    </span>
+                  </span>
+                </button>
+              </div>
 
               {shareModalBoard.isPublic && shareModalCode && (
                 <div className={styles.shareCodePanel}>

@@ -31,8 +31,9 @@ const USER_COLLECTION = 'users';
 const DEFAULT_USER_COLOR = '#2563EB';
 const DEFAULT_USER_EMOJI = '👤';
 const USER_CACHE_KEY_PREFIX = 'liveboard-user-cache:';
-const FIRESTORE_OP_TIMEOUT_MS = 8000;
-const RTDB_OP_TIMEOUT_MS = 8000;
+const FIRESTORE_OP_TIMEOUT_MS = 2500;
+const RTDB_OP_TIMEOUT_MS = 2500;
+const OFFLINE_NO_CACHE_ERROR = 'offline-no-cache';
 
 export interface UserRecordSnapshot {
   email: string | null;
@@ -70,6 +71,10 @@ function isTimeoutError(error: unknown): boolean {
 
 function isOfflineLikeError(error: unknown): boolean {
   return isFirestoreOfflineError(error) || isTimeoutError(error);
+}
+
+function isOfflineNoCacheError(error: unknown): boolean {
+  return error instanceof Error && error.message === OFFLINE_NO_CACHE_ERROR;
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
@@ -236,7 +241,11 @@ async function readFirestoreUser(userId: string): Promise<StoredUserDocument | n
     return user;
   } catch (error) {
     if (isOfflineLikeError(error)) {
-      return readCachedUser(userId);
+      const cachedUser = readCachedUser(userId);
+      if (cachedUser) {
+        return cachedUser;
+      }
+      throw new Error(OFFLINE_NO_CACHE_ERROR);
     }
 
     throw error;
@@ -288,9 +297,16 @@ async function migrateLegacyRealtimeUser(userId: string): Promise<StoredUserDocu
 }
 
 async function getOrMigrateUser(userId: string): Promise<StoredUserDocument | null> {
-  const firestoreUser = await readFirestoreUser(userId);
-  if (firestoreUser) {
-    return firestoreUser;
+  try {
+    const firestoreUser = await readFirestoreUser(userId);
+    if (firestoreUser) {
+      return firestoreUser;
+    }
+  } catch (error) {
+    if (isOfflineNoCacheError(error)) {
+      return null;
+    }
+    throw error;
   }
 
   if (isClientOffline()) {
@@ -332,6 +348,11 @@ export async function ensureUserProfileInFirestore(
 export async function getUserProfileFromFirestore(
   userId: string
 ): Promise<{ displayName: string; emoji: string; color: string } | null> {
+  const cachedUser = readCachedUser(userId);
+  if (cachedUser) {
+    return toUserProfileShape(cachedUser);
+  }
+
   const user = await getOrMigrateUser(userId);
   if (!user) {
     return null;
@@ -341,6 +362,11 @@ export async function getUserProfileFromFirestore(
 }
 
 export async function getUserBoardIdsFromFirestore(userId: string): Promise<string[]> {
+  const cachedUser = readCachedUser(userId);
+  if (cachedUser) {
+    return cachedUser.createdBoards;
+  }
+
   const user = await getOrMigrateUser(userId);
   if (!user) {
     return [];

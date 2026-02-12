@@ -80,9 +80,70 @@
   padding: 8px 10px;
 }
 
+.shareSigninPrompt {
+  width: min(320px, calc(100vw - 28px));
+  border: 1px solid #f2d7d5;
+  border-radius: 12px;
+  background: #fff7f7;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.shareSigninMessage {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #a13f39;
+}
+
+.shareSigninActions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.shareSigninPrimaryButton {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1.5px solid #111111;
+  border-radius: 999px;
+  background: #111111;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.shareSigninPrimaryButton:hover {
+  background: #000000;
+}
+
+.shareSigninDismissButton {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1.5px solid #111111;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #111111;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.shareSigninDismissButton:hover {
+  background: #111111;
+  color: #ffffff;
+}
+
+.shareSigninPrimaryButton:disabled,
+.shareSigninDismissButton:disabled {
+  opacity: 0.55;
+}
+
 .readOnlyBadge {
   position: fixed;
-  left: max(14px, env(safe-area-inset-left));
+  left: max(60px, calc(14px + env(safe-area-inset-left)));
   top: max(14px, env(safe-area-inset-top));
   z-index: 240;
   display: inline-flex;
@@ -116,6 +177,7 @@
   border: 1.25px solid #111111;
   border-radius: 16px;
   background: #ffffff;
+  overflow: hidden;
 }
 
 .shareModalHeader {
@@ -179,56 +241,65 @@
   color: #a13f39;
 }
 
-.shareVisibilityButton {
+.shareChecklist {
   margin-top: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.shareCheckRow {
   width: 100%;
-  min-height: 42px;
-  padding: 0 14px;
-  border: 2px solid #111111;
+  min-height: 52px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px;
+  border: 1.5px solid #111111;
   border-radius: 12px;
+  background: #ffffff;
+  text-align: left;
+}
+
+.shareCheckRow:disabled {
+  opacity: 0.58;
+}
+
+.shareCheckMark {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid #111111;
+  border-radius: 7px;
+  background: #ffffff;
+  color: transparent;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1;
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.shareCheckMarkActive {
+  background: #10b981;
+  color: #ffffff;
+  border-color: #0f8f66;
+}
+
+.shareCheckContent {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.shareCheckLabel {
   font-size: 14px;
   font-weight: 800;
-  text-align: center;
-}
-
-.shareVisibilityPublic {
-  background: #d3f3da;
-  color: #163d1f;
-}
-
-.shareVisibilityPrivate {
-  background: #f2f2f2;
   color: #111111;
 }
 
-.shareVisibilityButton:disabled {
-  opacity: 0.55;
-}
-
-.shareEditPermissionButton {
-  margin-top: 10px;
-  width: 100%;
-  min-height: 40px;
-  padding: 0 14px;
-  border: 2px solid #111111;
-  border-radius: 12px;
-  font-size: 13px;
-  font-weight: 800;
-  text-align: center;
-}
-
-.shareEditPermissionEnabled {
-  background: #dbeeff;
-  color: #0f2f57;
-}
-
-.shareEditPermissionDisabled {
-  background: #f7e8d4;
-  color: #4c2f04;
-}
-
-.shareEditPermissionHint {
-  margin: 8px 0 0;
+.shareCheckHint {
   font-size: 12px;
   color: #5f5f5f;
 }
@@ -379,8 +450,12 @@
     max-width: min(260px, calc(100vw - 20px));
   }
 
+  .shareSigninPrompt {
+    width: min(260px, calc(100vw - 20px));
+  }
+
   .readOnlyBadge {
-    left: max(10px, env(safe-area-inset-left));
+    left: max(52px, calc(10px + env(safe-area-inset-left)));
     top: max(10px, env(safe-area-inset-top));
     min-height: 32px;
     padding: 0 10px;

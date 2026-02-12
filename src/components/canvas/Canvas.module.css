@@ -37,6 +37,35 @@
   display: none;
 }
 
+.backButton {
+  position: fixed;
+  top: max(14px, env(safe-area-inset-top));
+  left: max(14px, env(safe-area-inset-left));
+  width: 36px;
+  height: 36px;
+  border: 2px solid #111111;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #111111;
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+  z-index: 250;
+  transition: background 120ms ease, color 120ms ease, transform 120ms ease;
+}
+
+.backButton:hover,
+.backButton:focus-visible {
+  background: #111111;
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
 .hydrationOverlay {
   position: absolute;
   inset: 0;
@@ -226,6 +255,15 @@
 }
 
 @media (max-width: 768px) {
+  .backButton {
+    top: max(10px, env(safe-area-inset-top));
+    left: max(10px, env(safe-area-inset-left));
+    width: 34px;
+    height: 34px;
+    font-size: 18px;
+    border-radius: 9px;
+  }
+
   .deleteButton {
     right: 12px;
     top: 12px;

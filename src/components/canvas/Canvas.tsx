@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import * as fabric from 'fabric';
+import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useCanvas } from './CanvasProvider';
 import { useAuth } from '@/components/providers/AuthProvider';
@@ -126,8 +127,8 @@ function applyCanvasCursors(
   }
 
   // select + eraser fallback
-  canvas.defaultCursor = 'default';
-  canvas.hoverCursor = 'move';
+  canvas.defaultCursor = FIGMA_SELECT_CURSOR;
+  canvas.hoverCursor = FIGMA_SELECT_CURSOR;
   canvas.moveCursor = 'grabbing';
 }
 
@@ -160,6 +161,7 @@ const REMOTE_CURSOR_TTL_MS = 45_000;
 const CANVAS_SYNC_DEBUG = process.env.NEXT_PUBLIC_CANVAS_SYNC_DEBUG === 'true';
 const CANVAS_CACHE_KEY_PREFIX = 'liveboard-canvas-cache:';
 const OPEN_IMAGE_PICKER_EVENT = 'liveboard:open-image-picker';
+const FIGMA_SELECT_CURSOR = 'url("/cursor.svg?v=2") 1 1, crosshair';
 const STICKY_CURSOR =
   'url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2732%27 height=%2732%27 viewBox=%270 0 32 32%27%3E%3Cg fill=%27none%27 fill-rule=%27evenodd%27%3E%3Crect x=%278%27 y=%273%27 width=%2716%27 height=%2726%27 rx=%272.5%27 fill=%27%23F6E46C%27 stroke=%27%232E3A4A%27 stroke-width=%271.8%27/%3E%3Cpath d=%27M19 3v5h5%27 stroke=%27%232E3A4A%27 stroke-width=%271.8%27 stroke-linecap=%27round%27/%3E%3Cpath d=%27M12 13.5h8M12 17.5h6%27 stroke=%27%23515F73%27 stroke-width=%271.5%27 stroke-linecap=%27round%27/%3E%3C/g%3E%3C/svg%3E") 5 4, copy';
 
@@ -2788,6 +2790,14 @@ export function Canvas() {
         className={styles.hiddenFileInput}
         onChange={handleImageFileInputChange}
       />
+      <Link
+        href="/"
+        className={styles.backButton}
+        title="Back to boards"
+        aria-label="Back to boards"
+      >
+        ←
+      </Link>
 
       {!canvasHydrated && showHydrationOverlay && (
         <div className={styles.hydrationOverlay}>

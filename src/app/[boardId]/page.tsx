@@ -9,6 +9,7 @@ import { CanvasProvider } from '@/components/canvas/CanvasProvider';
 import { Canvas } from '@/components/canvas/Canvas';
 import { Toolbar } from '@/components/toolbar/Toolbar';
 import { Loader } from '@/components/ui/Loader';
+import { loginWithGoogle } from '@/lib/firebase/auth';
 import { updateBoardSharing } from '@/lib/firebase/database';
 import { formatShareCode, normalizeShareCode } from '@/lib/utils/shareCode';
 import { Board } from '@/types/board';
@@ -39,6 +40,8 @@ function BoardView() {
   const [updatingShareSettings, setUpdatingShareSettings] = useState(false);
   const [copiedShareCode, setCopiedShareCode] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
+  const [showShareSigninPrompt, setShowShareSigninPrompt] = useState(false);
+  const [signingInWithGoogle, setSigningInWithGoogle] = useState(false);
   const [shareState, setShareState] = useState<ShareModalState | null>(null);
 
   useEffect(() => {
@@ -84,6 +87,14 @@ function BoardView() {
   }, [shareModalOpen, updatingShareSettings]);
 
   useEffect(() => {
+    if (isAnonymousUser) {
+      return;
+    }
+
+    setShowShareSigninPrompt(false);
+  }, [isAnonymousUser]);
+
+  useEffect(() => {
     if (!copiedShareCode) {
       return;
     }
@@ -104,6 +115,7 @@ function BoardView() {
 
     if (isAnonymousUser) {
       setShareError('Sign in with Google to share boards.');
+      setShowShareSigninPrompt(true);
       return;
     }
 
@@ -112,10 +124,45 @@ function BoardView() {
     }
 
     setShareError(null);
+    setShowShareSigninPrompt(false);
     setCopiedShareCode(false);
     setShareState(getShareModalState(board));
     setShareModalOpen(true);
   };
+
+  const handleDismissShareSigninPrompt = useCallback(() => {
+    setShowShareSigninPrompt(false);
+    setShareError(null);
+  }, []);
+
+  const handleShareSignInWithGoogle = useCallback(async () => {
+    if (signingInWithGoogle) {
+      return;
+    }
+
+    setSigningInWithGoogle(true);
+    setShareError(null);
+
+    try {
+      await loginWithGoogle();
+      setShowShareSigninPrompt(false);
+      setShareError(null);
+
+      if (!board) {
+        return;
+      }
+
+      setCopiedShareCode(false);
+      setShareState(getShareModalState(board));
+      setShareModalOpen(true);
+    } catch (signInError: unknown) {
+      console.error('Google sign-in error:', signInError);
+      setShareError(parseErrorMessage(signInError, 'Failed to sign in with Google'));
+      setShowShareSigninPrompt(true);
+    } finally {
+      setSigningInWithGoogle(false);
+    }
+  }, [board, signingInWithGoogle]);
 
   const handleCloseShareModal = useCallback(() => {
     if (updatingShareSettings) {
@@ -225,7 +272,34 @@ function BoardView() {
         >
           ↗
         </button>
-        {shareError && !shareModalOpen && (
+        {showShareSigninPrompt && (
+          <div className={styles.shareSigninPrompt} role="alert">
+            <p className={styles.shareSigninMessage}>
+              {shareError ?? 'Sign in with Google to share boards.'}
+            </p>
+            <div className={styles.shareSigninActions}>
+              <button
+                type="button"
+                className={styles.shareSigninPrimaryButton}
+                onClick={() => {
+                  void handleShareSignInWithGoogle();
+                }}
+                disabled={signingInWithGoogle}
+              >
+                {signingInWithGoogle ? 'Signing in...' : 'Sign in with Google'}
+              </button>
+              <button
+                type="button"
+                className={styles.shareSigninDismissButton}
+                onClick={handleDismissShareSigninPrompt}
+                disabled={signingInWithGoogle}
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+        {shareError && !shareModalOpen && !showShareSigninPrompt && (
           <p className={styles.shareIslandError} role="alert">
             {shareError}
           </p>
@@ -279,47 +353,58 @@ function BoardView() {
                 </p>
               )}
 
-              <button
-                type="button"
-                className={`${styles.shareVisibilityButton} ${isPublic ? styles.shareVisibilityPublic : styles.shareVisibilityPrivate}`}
-                onClick={() => {
-                  void handleUpdateBoardSharing(!isPublic, allowSharedEditing);
-                }}
-                disabled={updatingShareSettings}
-              >
-                {updatingShareSettings
-                  ? 'Updating...'
-                  : isPublic
-                    ? 'Public (click to make private)'
-                    : 'Private (click to make public)'}
-              </button>
-
-              {isPublic && (
-                <>
-                  <button
-                    type="button"
-                    className={`${styles.shareEditPermissionButton} ${
-                      allowSharedEditing
-                        ? styles.shareEditPermissionEnabled
-                        : styles.shareEditPermissionDisabled
-                    }`}
-                    onClick={() => {
-                      void handleUpdateBoardSharing(true, !allowSharedEditing);
-                    }}
-                    disabled={updatingShareSettings}
+              <div className={styles.shareChecklist}>
+                <button
+                  type="button"
+                  className={styles.shareCheckRow}
+                  onClick={() => {
+                    void handleUpdateBoardSharing(!isPublic, allowSharedEditing);
+                  }}
+                  disabled={updatingShareSettings}
+                >
+                  <span
+                    className={`${styles.shareCheckMark} ${isPublic ? styles.shareCheckMarkActive : ''}`}
+                    aria-hidden="true"
                   >
-                    {updatingShareSettings
-                      ? 'Updating...'
-                      : allowSharedEditing
-                        ? 'Guests can edit (click to make view-only)'
-                        : 'Guests view-only (click to allow editing)'}
-                  </button>
-                  <p className={styles.shareEditPermissionHint}>
-                    Owners can always edit. This setting applies to anyone joining with the share
-                    code.
-                  </p>
-                </>
-              )}
+                    {isPublic ? '✓' : ''}
+                  </span>
+                  <span className={styles.shareCheckContent}>
+                    <span className={styles.shareCheckLabel}>Public sharing</span>
+                    <span className={styles.shareCheckHint}>
+                      Anyone with the access code can open this board.
+                    </span>
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  className={styles.shareCheckRow}
+                  onClick={() => {
+                    if (!isPublic) {
+                      return;
+                    }
+                    void handleUpdateBoardSharing(true, !allowSharedEditing);
+                  }}
+                  disabled={!isPublic || updatingShareSettings}
+                >
+                  <span
+                    className={`${styles.shareCheckMark} ${
+                      isPublic && allowSharedEditing ? styles.shareCheckMarkActive : ''
+                    }`}
+                    aria-hidden="true"
+                  >
+                    {isPublic && allowSharedEditing ? '✓' : ''}
+                  </span>
+                  <span className={styles.shareCheckContent}>
+                    <span className={styles.shareCheckLabel}>Allow guest editing</span>
+                    <span className={styles.shareCheckHint}>
+                      {isPublic
+                        ? 'Guests can draw and edit when this is checked.'
+                        : 'Enable public sharing first.'}
+                    </span>
+                  </span>
+                </button>
+              </div>
 
               {isPublic && shareModalCode && (
                 <div className={styles.shareCodePanel}>
