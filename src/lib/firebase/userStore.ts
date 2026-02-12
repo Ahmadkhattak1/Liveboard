@@ -170,6 +170,32 @@ function normalizeDisplayName(value: unknown): string {
   return trimmed.length > 0 ? trimmed : 'Anonymous';
 }
 
+function isPlaceholderDisplayName(value: string): boolean {
+  return (
+    value === 'Anonymous' ||
+    value.startsWith('Anonymous ') ||
+    value === 'Google User'
+  );
+}
+
+function mergeDisplayName(seedValue: string, existingValue: string | undefined): string {
+  const seedDisplayName = normalizeDisplayName(seedValue);
+  const existingDisplayName = normalizeDisplayName(existingValue);
+
+  if (!existingValue || existingValue.trim().length === 0) {
+    return seedDisplayName;
+  }
+
+  if (
+    isPlaceholderDisplayName(existingDisplayName) &&
+    !isPlaceholderDisplayName(seedDisplayName)
+  ) {
+    return seedDisplayName;
+  }
+
+  return existingDisplayName;
+}
+
 function normalizeEmoji(value: unknown): string {
   return typeof value === 'string' && value.length > 0 ? value : DEFAULT_USER_EMOJI;
 }
@@ -206,6 +232,18 @@ function toUserProfileShape(user: StoredUserDocument): {
     displayName: user.displayName,
     emoji: user.emoji,
     color: user.color,
+  };
+}
+
+function toUserRecordSnapshot(user: StoredUserDocument): UserRecordSnapshot {
+  return {
+    email: user.email,
+    displayName: user.displayName,
+    emoji: user.emoji,
+    color: user.color,
+    createdBoards: user.createdBoards,
+    createdAt: user.createdAt,
+    isAnonymous: user.isAnonymous,
   };
 }
 
@@ -326,7 +364,7 @@ function mergeUserSeed(
   return {
     id: userId,
     email: seed.email ?? existing?.email ?? null,
-    displayName: normalizeDisplayName(seed.displayName || existing?.displayName),
+    displayName: mergeDisplayName(seed.displayName, existing?.displayName),
     emoji: normalizeEmoji(existing?.emoji || seed.emoji),
     color: normalizeColor(existing?.color || seed.color),
     isAnonymous: seed.isAnonymous,
@@ -449,15 +487,16 @@ export async function getFullUserFromFirestore(
     return null;
   }
 
-  return {
-    email: user.email,
-    displayName: user.displayName,
-    emoji: user.emoji,
-    color: user.color,
-    createdBoards: user.createdBoards,
-    createdAt: user.createdAt,
-    isAnonymous: user.isAnonymous,
-  };
+  return toUserRecordSnapshot(user);
+}
+
+export function getCachedUserSnapshot(userId: string): UserRecordSnapshot | null {
+  const cachedUser = readCachedUser(userId);
+  if (!cachedUser) {
+    return null;
+  }
+
+  return toUserRecordSnapshot(cachedUser);
 }
 
 export async function deleteUserDataFromStores(userId: string): Promise<void> {

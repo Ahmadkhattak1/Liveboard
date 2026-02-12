@@ -18,22 +18,45 @@ import { FirebaseError } from 'firebase/app';
 import { deleteApp, initializeApp } from 'firebase/app';
 import { app, auth } from './config';
 import { User, LoginCredentials, SignupCredentials } from '@/types/user';
-import { getRandomEmoji } from '@/lib/constants/tools';
-import { getRandomColor } from '@/lib/constants/colors';
+import { getRandomEmoji, USER_EMOJIS } from '@/lib/constants/tools';
+import { getRandomColor, USER_COLORS } from '@/lib/constants/colors';
 import {
   deleteUserDataFromStores,
   ensureUserProfileInFirestore,
+  getCachedUserSnapshot,
   getFullUserFromFirestore,
   mergeImportedUserDataIntoAccount,
   UserProfileSeed,
 } from './userStore';
 import { transferBoardOwnership } from './database';
 
+function getStableIndexFromString(value: string, modulo: number): number {
+  if (modulo <= 0) {
+    return 0;
+  }
+
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0) % modulo;
+}
+
+function getStableUserEmoji(userId: string): string {
+  return USER_EMOJIS[getStableIndexFromString(userId, USER_EMOJIS.length)] || '👤';
+}
+
+function getStableUserColor(userId: string): string {
+  return USER_COLORS[getStableIndexFromString(userId, USER_COLORS.length)] || '#2563EB';
+}
+
 function toUserProfileSeed(
   firebaseUser: FirebaseUser,
   overrides: Partial<UserProfileSeed> = {}
 ): UserProfileSeed {
-  const emoji = overrides.emoji ?? getRandomEmoji();
+  const emoji = overrides.emoji ?? getStableUserEmoji(firebaseUser.uid);
 
   return {
     email: overrides.email ?? firebaseUser.email,
@@ -42,7 +65,7 @@ function toUserProfileSeed(
       firebaseUser.displayName ??
       (firebaseUser.isAnonymous ? `Anonymous ${emoji}` : 'Google User'),
     emoji,
-    color: overrides.color ?? getRandomColor(),
+    color: overrides.color ?? getStableUserColor(firebaseUser.uid),
     isAnonymous: overrides.isAnonymous ?? firebaseUser.isAnonymous,
   };
 }
@@ -60,12 +83,21 @@ function isAccountAlreadyLinkedError(error: unknown): error is FirebaseError {
 }
 
 function convertFirebaseUserWithDefaults(firebaseUser: FirebaseUser): User {
+  const cachedProfile = getCachedUserSnapshot(firebaseUser.uid);
+  if (cachedProfile) {
+    return applyStoredProfile(firebaseUser, cachedProfile);
+  }
+
+  const emoji = getStableUserEmoji(firebaseUser.uid);
+
   return {
     id: firebaseUser.uid,
     email: firebaseUser.email,
-    displayName: firebaseUser.displayName || 'Anonymous',
-    emoji: '👤',
-    color: '#2563EB',
+    displayName:
+      firebaseUser.displayName ??
+      (firebaseUser.isAnonymous ? `Anonymous ${emoji}` : 'Anonymous'),
+    emoji,
+    color: getStableUserColor(firebaseUser.uid),
     createdBoards: [],
     createdAt: Date.now(),
     isAnonymous: firebaseUser.isAnonymous,
@@ -211,16 +243,13 @@ export async function signupWithEmail(
 export async function loginAnonymously(): Promise<UserCredential> {
   const userCredential = await signInAnonymously(auth);
 
-  const emoji = getRandomEmoji();
-  const color = getRandomColor();
-
-  await ensureUserProfileInFirestore(userCredential.user.uid, {
-    email: null,
-    displayName: `Anonymous ${emoji}`,
-    emoji,
-    color,
-    isAnonymous: true,
-  });
+  await ensureUserProfileInFirestore(
+    userCredential.user.uid,
+    toUserProfileSeed(userCredential.user, {
+      email: null,
+      isAnonymous: true,
+    })
+  );
 
   return userCredential;
 }
