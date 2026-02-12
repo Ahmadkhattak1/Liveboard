@@ -9,7 +9,7 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    function isValidUserDoc(userId) {
+    function hasValidUserShape(userId) {
       return request.resource.data.keys().hasOnly([
         'id',
         'email',
@@ -21,8 +21,19 @@ service cloud.firestore {
         'createdAt',
         'updatedAt'
       ]) &&
+      request.resource.data.keys().hasAll([
+        'id',
+        'displayName',
+        'emoji',
+        'color',
+        'isAnonymous',
+        'createdBoards',
+        'createdAt',
+        'updatedAt'
+      ]) &&
       request.resource.data.id == userId &&
-      (request.resource.data.email == null || request.resource.data.email is string) &&
+      (request.resource.data.email == null ||
+        (request.resource.data.email is string && request.resource.data.email.size() <= 320)) &&
       request.resource.data.displayName is string &&
       request.resource.data.displayName.size() > 0 &&
       request.resource.data.displayName.size() <= 120 &&
@@ -34,15 +45,19 @@ service cloud.firestore {
       request.resource.data.color.size() <= 32 &&
       request.resource.data.isAnonymous is bool &&
       request.resource.data.createdBoards is list &&
-      request.resource.data.createdBoards.size() <= 1000 &&
+      request.resource.data.createdBoards.size() <= 2000 &&
       request.resource.data.createdAt is int &&
-      request.resource.data.updatedAt is int;
+      request.resource.data.updatedAt is int &&
+      request.resource.data.updatedAt >= request.resource.data.createdAt;
     }
 
     match /users/{userId} {
       allow get: if isOwner(userId);
       allow list: if false;
-      allow create, update: if isOwner(userId) && isValidUserDoc(userId);
+
+      allow create, update: if isOwner(userId)
+        && hasValidUserShape(userId);
+
       allow delete: if isOwner(userId);
     }
   }

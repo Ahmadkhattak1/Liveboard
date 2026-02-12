@@ -8,20 +8,21 @@
         ".write": "auth != null && ((!data.exists() && newData.child('metadata/createdBy').val() === auth.uid && newData.child('metadata/id').val() === $boardId) || data.child('metadata/createdBy').val() === auth.uid)",
         "metadata": {
           ".write": "auth != null && data.parent().child('metadata/createdBy').val() === auth.uid",
+          ".validate": "newData.hasChildren(['id', 'createdBy', 'createdAt', 'updatedAt', 'isPublic']) && newData.child('id').isString() && newData.child('id').val() === $boardId && newData.child('createdBy').isString() && newData.child('createdBy').val().length > 0 && newData.child('createdBy').val().length <= 128 && newData.child('createdAt').isNumber() && newData.child('updatedAt').isNumber() && newData.child('updatedAt').val() >= newData.child('createdAt').val() && newData.child('isPublic').isBoolean() && (!newData.child('allowSharedEditing').exists() || newData.child('allowSharedEditing').isBoolean()) && (!newData.child('title').exists() || (newData.child('title').isString() && newData.child('title').val().length > 0 && newData.child('title').val().length <= 200)) && (!newData.child('emoji').exists() || (newData.child('emoji').isString() && newData.child('emoji').val().length > 0 && newData.child('emoji').val().length <= 16)) && (!newData.child('shareCode').exists() || newData.child('shareCode').val() === null || (newData.child('shareCode').isString() && newData.child('shareCode').val().matches(/^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{8}$/)))",
           "id": {
             ".validate": "newData.isString() && newData.val() === $boardId"
           },
           "title": {
-            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 200"
+            ".validate": "!newData.exists() || (newData.isString() && newData.val().length > 0 && newData.val().length <= 200)"
           },
           "emoji": {
-            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 16"
+            ".validate": "!newData.exists() || (newData.isString() && newData.val().length > 0 && newData.val().length <= 16)"
           },
           "createdAt": {
             ".validate": "newData.isNumber()"
           },
           "createdBy": {
-            ".validate": "newData.isString() && newData.val().length > 0"
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 128"
           },
           "updatedAt": {
             ".write": "auth != null && (data.parent().child('createdBy').val() === auth.uid || (auth.token.firebase.sign_in_provider != 'anonymous' && data.parent().child('isPublic').val() === true && data.parent().child('allowSharedEditing').val() !== false))",
@@ -31,18 +32,20 @@
             ".validate": "newData.isBoolean()"
           },
           "shareCode": {
-            ".validate": "newData.val() === null || (newData.isString() && newData.val().matches(/^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{8}$/))"
+            ".validate": "!newData.exists() || newData.val() === null || (newData.isString() && newData.val().matches(/^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{8}$/))"
           },
           "allowSharedEditing": {
-            ".validate": "newData.isBoolean()"
+            ".validate": "!newData.exists() || newData.isBoolean()"
           }
         },
         "canvas": {
-          ".write": "auth != null && (data.parent().child('metadata/createdBy').val() === auth.uid || (auth.token.firebase.sign_in_provider != 'anonymous' && data.parent().child('metadata/isPublic').val() === true && data.parent().child('metadata/allowSharedEditing').val() !== false))"
+          ".write": "auth != null && (data.parent().child('metadata/createdBy').val() === auth.uid || (auth.token.firebase.sign_in_provider != 'anonymous' && data.parent().child('metadata/isPublic').val() === true && data.parent().child('metadata/allowSharedEditing').val() !== false))",
+          ".validate": "newData.hasChildren(['version', 'objects']) && (!newData.child('updatedBy').exists() || (newData.child('updatedBy').isString() && newData.child('updatedBy').val() === auth.uid)) && (!newData.child('updatedAt').exists() || newData.child('updatedAt').isNumber()) && (!newData.child('objectCount').exists() || (newData.child('objectCount').isNumber() && newData.child('objectCount').val() >= 0 && newData.child('objectCount').val() <= 10000))"
         },
         "presence": {
           "$presenceId": {
-            ".write": "auth != null && (data.parent().parent().child('metadata/createdBy').val() === auth.uid || (auth.token.firebase.sign_in_provider != 'anonymous' && data.parent().parent().child('metadata/isPublic').val() === true))"
+            ".write": "auth != null && (data.parent().parent().child('metadata/createdBy').val() === auth.uid || (auth.token.firebase.sign_in_provider != 'anonymous' && data.parent().parent().child('metadata/isPublic').val() === true)) && ((newData.val() === null && (!data.exists() || data.child('userId').val() === auth.uid)) || (newData.val() !== null && newData.child('userId').val() === auth.uid && (!data.exists() || data.child('userId').val() === auth.uid) && (!newData.child('sessionId').exists() || newData.child('sessionId').val() === $presenceId)))",
+            ".validate": "newData.val() === null || (newData.hasChildren(['userId', 'displayName', 'color', 'emoji', 'cursor', 'lastSeen', 'isActive']) && newData.child('userId').isString() && newData.child('userId').val() === auth.uid && (!newData.child('sessionId').exists() || (newData.child('sessionId').isString() && newData.child('sessionId').val() === $presenceId)) && newData.child('displayName').isString() && newData.child('displayName').val().length > 0 && newData.child('displayName').val().length <= 120 && newData.child('color').isString() && newData.child('color').val().length > 0 && newData.child('color').val().length <= 32 && newData.child('emoji').isString() && newData.child('emoji').val().length > 0 && newData.child('emoji').val().length <= 16 && newData.child('cursor/x').isNumber() && newData.child('cursor/y').isNumber() && newData.child('lastSeen').isNumber() && newData.child('isActive').isBoolean() && (!newData.child('activity').exists() || ((!newData.child('activity/tool').exists() || newData.child('activity/tool').isString()) && (!newData.child('activity/isDrawing').exists() || newData.child('activity/isDrawing').isBoolean()) && (!newData.child('activity/updatedAt').exists() || newData.child('activity/updatedAt').isNumber()))))"
           }
         }
       }
@@ -50,14 +53,15 @@
     "shareCodes": {
       "$code": {
         ".read": "auth != null && auth.token.firebase.sign_in_provider != 'anonymous'",
-        ".write": "auth != null && auth.token.firebase.sign_in_provider != 'anonymous' && ((newData.val() === null && (!data.exists() || (data.isString() && newData.root.child('boards/' + data.val() + '/metadata/createdBy').val() === auth.uid))) || (newData.isString() && newData.val().length > 0 && newData.root.child('boards/' + newData.val() + '/metadata/createdBy').val() === auth.uid && newData.root.child('boards/' + newData.val() + '/metadata/isPublic').val() === true && newData.root.child('boards/' + newData.val() + '/metadata/shareCode').val() === $code))",
-        ".validate": "newData.val() === null || ($code.matches(/^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{8}$/) && newData.isString() && newData.val().length > 0)"
+        ".write": "auth != null && auth.token.firebase.sign_in_provider != 'anonymous' && ((newData.val() === null && (!data.exists() || (data.isString() && (!newData.root.child('boards/' + data.val()).exists() || newData.root.child('boards/' + data.val() + '/metadata/createdBy').val() === auth.uid)))) || (newData.isString() && (!data.exists() || data.val() === newData.val()) && newData.root.child('boards/' + newData.val() + '/metadata/createdBy').val() === auth.uid && newData.root.child('boards/' + newData.val() + '/metadata/isPublic').val() === true && newData.root.child('boards/' + newData.val() + '/metadata/shareCode').val() === $code))",
+        ".validate": "newData.val() === null || ($code.matches(/^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{8}$/) && newData.isString() && newData.val().length > 0 && newData.val().length <= 128)"
       }
     },
     "users": {
       "$uid": {
         ".read": "auth != null && auth.uid === $uid",
-        ".write": "auth != null && auth.uid === $uid"
+        ".write": "auth != null && auth.uid === $uid",
+        ".validate": "newData.val() === null || (newData.hasChildren(['displayName', 'emoji', 'color', 'createdAt', 'updatedAt']) && (!newData.child('email').exists() || newData.child('email').val() === null || newData.child('email').isString()) && newData.child('displayName').isString() && newData.child('displayName').val().length > 0 && newData.child('displayName').val().length <= 120 && newData.child('emoji').isString() && newData.child('emoji').val().length > 0 && newData.child('emoji').val().length <= 16 && newData.child('color').isString() && newData.child('color').val().length > 0 && newData.child('color').val().length <= 32 && (!newData.child('isAnonymous').exists() || newData.child('isAnonymous').isBoolean()) && newData.child('createdAt').isNumber() && newData.child('updatedAt').isNumber())"
       }
     }
   }

@@ -82,12 +82,7 @@ function isAccountAlreadyLinkedError(error: unknown): error is FirebaseError {
   );
 }
 
-function convertFirebaseUserWithDefaults(firebaseUser: FirebaseUser): User {
-  const cachedProfile = getCachedUserSnapshot(firebaseUser.uid);
-  if (cachedProfile) {
-    return applyStoredProfile(firebaseUser, cachedProfile);
-  }
-
+function buildFallbackUser(firebaseUser: FirebaseUser): User {
   const emoji = getStableUserEmoji(firebaseUser.uid);
 
   return {
@@ -106,10 +101,9 @@ function convertFirebaseUserWithDefaults(firebaseUser: FirebaseUser): User {
 
 function applyStoredProfile(
   firebaseUser: FirebaseUser,
-  storedProfile: Awaited<ReturnType<typeof getFullUserFromFirestore>>
+  storedProfile: Awaited<ReturnType<typeof getFullUserFromFirestore>>,
+  fallbackUser: User = buildFallbackUser(firebaseUser)
 ): User {
-  const fallbackUser = convertFirebaseUserWithDefaults(firebaseUser);
-
   if (!storedProfile) {
     return fallbackUser;
   }
@@ -124,6 +118,12 @@ function applyStoredProfile(
     createdAt: storedProfile.createdAt,
     isAnonymous: firebaseUser.isAnonymous,
   };
+}
+
+function convertFirebaseUserWithDefaults(firebaseUser: FirebaseUser): User {
+  const fallbackUser = buildFallbackUser(firebaseUser);
+  const cachedProfile = getCachedUserSnapshot(firebaseUser.uid);
+  return applyStoredProfile(firebaseUser, cachedProfile, fallbackUser);
 }
 
 async function convertFirebaseUserWithProfile(
