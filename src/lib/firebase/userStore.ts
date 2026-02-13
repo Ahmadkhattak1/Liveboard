@@ -200,6 +200,21 @@ function mergeDisplayName(seedValue: string, existingValue: string | undefined):
   return existingDisplayName;
 }
 
+function pickPreferredExistingDisplayName(
+  primary: string | undefined,
+  secondary: string | undefined
+): string | undefined {
+  if (primary && !isPlaceholderDisplayName(normalizeDisplayName(primary))) {
+    return primary;
+  }
+
+  if (secondary && !isPlaceholderDisplayName(normalizeDisplayName(secondary))) {
+    return secondary;
+  }
+
+  return primary ?? secondary;
+}
+
 function normalizeEmoji(value: unknown): string {
   return typeof value === 'string' && value.length > 0 ? value : DEFAULT_USER_EMOJI;
 }
@@ -466,6 +481,10 @@ export async function mergeImportedUserDataIntoAccount(
   additionalBoardIds: string[] = []
 ): Promise<string[]> {
   const targetUser = await getOrMigrateUser(targetUserId);
+  const preferredExistingDisplayName = pickPreferredExistingDisplayName(
+    targetUser?.displayName,
+    sourceUserData?.displayName
+  );
   const sourceBoards = sourceUserData?.createdBoards ?? [];
   const importedBoards = Array.from(
     new Set(
@@ -481,9 +500,7 @@ export async function mergeImportedUserDataIntoAccount(
   const mergedTargetUser: StoredUserDocument = {
     id: targetUserId,
     email: targetSeed.email ?? targetUser?.email ?? sourceUserData?.email ?? null,
-    displayName: normalizeDisplayName(
-      targetSeed.displayName || targetUser?.displayName || sourceUserData?.displayName
-    ),
+    displayName: mergeDisplayName(targetSeed.displayName, preferredExistingDisplayName),
     emoji: normalizeEmoji(targetUser?.emoji || sourceUserData?.emoji || targetSeed.emoji),
     color: normalizeColor(targetUser?.color || sourceUserData?.color || targetSeed.color),
     isAnonymous: false,

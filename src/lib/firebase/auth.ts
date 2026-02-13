@@ -75,17 +75,82 @@ function getStableUserColor(userId: string): string {
   return USER_COLORS[getStableIndexFromString(userId, USER_COLORS.length)] || '#2563EB';
 }
 
+function normalizeDisplayNameValue(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmedValue = value.trim();
+  return trimmedValue.length > 0 ? trimmedValue : null;
+}
+
+function deriveDisplayNameFromEmail(email: string | null | undefined): string | null {
+  if (typeof email !== 'string' || email.length === 0) {
+    return null;
+  }
+
+  const [localPart] = email.split('@');
+  if (!localPart) {
+    return null;
+  }
+
+  const normalizedLocalPart = localPart
+    .replace(/[._-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (normalizedLocalPart.length === 0) {
+    return null;
+  }
+
+  return normalizedLocalPart
+    .split(' ')
+    .map((segment) => {
+      if (segment.length === 0) {
+        return '';
+      }
+
+      return segment[0].toUpperCase() + segment.slice(1);
+    })
+    .join(' ');
+}
+
+function resolveFirebaseDisplayName(firebaseUser: FirebaseUser): string | null {
+  const directDisplayName = normalizeDisplayNameValue(firebaseUser.displayName);
+  if (directDisplayName) {
+    return directDisplayName;
+  }
+
+  for (const providerProfile of firebaseUser.providerData) {
+    const providerDisplayName = normalizeDisplayNameValue(providerProfile.displayName);
+    if (providerDisplayName) {
+      return providerDisplayName;
+    }
+  }
+
+  return deriveDisplayNameFromEmail(firebaseUser.email);
+}
+
+function isPlaceholderDisplayName(displayName: string): boolean {
+  return (
+    displayName === 'Anonymous' ||
+    displayName.startsWith('Anonymous ') ||
+    displayName === 'Google User'
+  );
+}
+
 function toUserProfileSeed(
   firebaseUser: FirebaseUser,
   overrides: Partial<UserProfileSeed> = {}
 ): UserProfileSeed {
   const emoji = overrides.emoji ?? getStableUserEmoji(firebaseUser.uid);
+  const resolvedDisplayName = resolveFirebaseDisplayName(firebaseUser);
 
   return {
     email: overrides.email ?? firebaseUser.email,
     displayName:
       overrides.displayName ??
-      firebaseUser.displayName ??
+      resolvedDisplayName ??
       (firebaseUser.isAnonymous ? `Anonymous ${emoji}` : 'Google User'),
     emoji,
     color: overrides.color ?? getStableUserColor(firebaseUser.uid),
@@ -107,12 +172,13 @@ function isAccountAlreadyLinkedError(error: unknown): error is FirebaseError {
 
 function buildFallbackUser(firebaseUser: FirebaseUser): User {
   const emoji = getStableUserEmoji(firebaseUser.uid);
+  const resolvedDisplayName = resolveFirebaseDisplayName(firebaseUser);
 
   return {
     id: firebaseUser.uid,
     email: firebaseUser.email,
     displayName:
-      firebaseUser.displayName ??
+      resolvedDisplayName ??
       (firebaseUser.isAnonymous ? `Anonymous ${emoji}` : 'Anonymous'),
     emoji,
     color: getStableUserColor(firebaseUser.uid),
@@ -131,10 +197,18 @@ function applyStoredProfile(
     return fallbackUser;
   }
 
+  const storedDisplayName = normalizeDisplayNameValue(storedProfile.displayName);
+  const shouldPreferFallbackDisplayName =
+    !storedDisplayName ||
+    (isPlaceholderDisplayName(storedDisplayName) &&
+      !isPlaceholderDisplayName(fallbackUser.displayName));
+
   return {
     id: firebaseUser.uid,
     email: firebaseUser.email ?? storedProfile.email,
-    displayName: storedProfile.displayName || fallbackUser.displayName,
+    displayName: shouldPreferFallbackDisplayName
+      ? fallbackUser.displayName
+      : storedDisplayName,
     emoji: storedProfile.emoji || fallbackUser.emoji,
     color: storedProfile.color || fallbackUser.color,
     createdBoards: storedProfile.createdBoards,
