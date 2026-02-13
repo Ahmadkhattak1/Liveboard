@@ -427,21 +427,28 @@ export async function saveBoardCanvasState(
 
 export function subscribeToBoardCanvas(
   boardId: string,
-  callback: (canvasState: BoardCanvas) => void
+  callback: (canvasState: BoardCanvas) => void,
+  onError?: (error: unknown) => void
 ): () => void {
   const canvasRef = ref(database, `boards/${boardId}/canvas`);
-  return onValue(canvasRef, (snapshot) => {
-    if (!snapshot.exists()) {
-      callback({
-        version: '6.0.0',
-        objects: [],
-        background: 'transparent',
-      });
-      return;
-    }
+  return onValue(
+    canvasRef,
+    (snapshot) => {
+      if (!snapshot.exists()) {
+        callback({
+          version: '6.0.0',
+          objects: [],
+          background: 'transparent',
+        });
+        return;
+      }
 
-    callback(snapshot.val() as BoardCanvas);
-  });
+      callback(snapshot.val() as BoardCanvas);
+    },
+    (error) => {
+      onError?.(error);
+    }
+  );
 }
 
 export async function getUserProfile(
@@ -545,14 +552,21 @@ export async function removePresence(
 
 export function subscribeToBoard(
   boardId: string,
-  callback: (board: Board) => void
+  callback: (board: Board) => void,
+  onError?: (error: unknown) => void
 ): () => void {
   const boardRef = ref(database, `boards/${boardId}`);
-  const unsubscribe = onValue(boardRef, (snapshot) => {
-    if (snapshot.exists()) {
-      callback(snapshot.val() as Board);
+  const unsubscribe = onValue(
+    boardRef,
+    (snapshot) => {
+      if (snapshot.exists()) {
+        callback(snapshot.val() as Board);
+      }
+    },
+    (error) => {
+      onError?.(error);
     }
-  });
+  );
 
   return unsubscribe;
 }
@@ -598,7 +612,8 @@ export function subscribeToCanvasObjects(
 
 export function subscribeToPresence(
   boardId: string,
-  callback: (presence: Record<string, UserPresence>) => void
+  callback: (presence: Record<string, UserPresence>) => void,
+  onError?: (error: unknown) => void
 ): () => void {
   const presenceRef = ref(database, `boards/${boardId}/presence`);
   const presenceBySession: Record<string, UserPresence> = {};
@@ -619,13 +634,18 @@ export function subscribeToPresence(
 
   callback({});
 
+  const handleSubscriptionError = (error: unknown) => {
+    callback({});
+    onError?.(error);
+  };
+
   const addedUnsubscribe = onChildAdded(presenceRef, (snapshot) => {
     const presenceId = snapshot.key;
     if (!presenceId) {
       return;
     }
     upsertPresence(presenceId, snapshot.val());
-  });
+  }, handleSubscriptionError);
 
   const changedUnsubscribe = onChildChanged(presenceRef, (snapshot) => {
     const presenceId = snapshot.key;
@@ -633,7 +653,7 @@ export function subscribeToPresence(
       return;
     }
     upsertPresence(presenceId, snapshot.val());
-  });
+  }, handleSubscriptionError);
 
   const removedUnsubscribe = onChildRemoved(presenceRef, (snapshot) => {
     const presenceId = snapshot.key;
@@ -642,7 +662,7 @@ export function subscribeToPresence(
     }
     delete presenceBySession[presenceId];
     emitPresence();
-  });
+  }, handleSubscriptionError);
 
   return () => {
     addedUnsubscribe();

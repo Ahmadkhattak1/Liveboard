@@ -524,6 +524,10 @@ function resolveGridZoomLevel(canvas: fabric.Canvas): number {
   return clampNumber(zoomLevel, MIN_ZOOM, MAX_ZOOM);
 }
 
+function logPresenceSyncError(action: string, error: unknown): void {
+  console.warn(`Failed to sync presence (${action}).`, error);
+}
+
 export function Canvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageFileInputRef = useRef<HTMLInputElement>(null);
@@ -597,6 +601,7 @@ export function Canvas() {
   const viewportTickThrottleRef = useRef(0);
   const hasSeenInitialRemoteCanvasRef = useRef(false);
   const autoLoginAttemptedRef = useRef(false);
+  const hasInitializedPresenceRef = useRef(false);
 
   useEffect(() => {
     if (authLoading || user?.id || autoLoginAttemptedRef.current) {
@@ -624,7 +629,7 @@ export function Canvas() {
   }, [effectiveTool]);
 
   useEffect(() => {
-    if (!boardId || !syncUserId) {
+    if (!boardId || !syncUserId || !hasInitializedPresenceRef.current) {
       return;
     }
 
@@ -635,6 +640,8 @@ export function Canvas() {
         trail: [],
         updatedAt: Date.now(),
       },
+    }).catch((error) => {
+      logPresenceSyncError('tool change', error);
     });
   }, [boardId, effectiveTool, localPresenceSessionId, syncUserId]);
 
@@ -959,72 +966,82 @@ export function Canvas() {
       window.clearTimeout(hydrationTimeout);
     };
 
-    const unsubscribe = subscribeToBoardCanvas(boardId, (remoteCanvasState) => {
-      if (isCancelled) {
-        return;
-      }
+    const unsubscribe = subscribeToBoardCanvas(
+      boardId,
+      (remoteCanvasState) => {
+        if (isCancelled) {
+          return;
+        }
 
-      const normalizedState = normalizeBoardCanvasState(remoteCanvasState);
-      writeCachedBoardCanvas(boardId, normalizedState);
-      const remoteHash = stringifyCanvasState(normalizedState);
-      logCanvasSync('remote:update', {
-        boardId,
-        remoteObjects: normalizedState.objects.length,
-      });
+        const normalizedState = normalizeBoardCanvasState(remoteCanvasState);
+        writeCachedBoardCanvas(boardId, normalizedState);
+        const remoteHash = stringifyCanvasState(normalizedState);
+        logCanvasSync('remote:update', {
+          boardId,
+          remoteObjects: normalizedState.objects.length,
+        });
 
-      if (remoteHash === lastCanvasHashRef.current) {
-        if (pendingCanvasPersistRef.current?.hash === remoteHash) {
+        if (remoteHash === lastCanvasHashRef.current) {
+          if (pendingCanvasPersistRef.current?.hash === remoteHash) {
+            pendingCanvasPersistRef.current = null;
+            pendingCanvasMutationsRef.current.clear();
+          }
+          logCanvasSync('remote:skip:lastHash');
+          markHydrated();
+          return;
+        }
+
+        const localHash = stringifyCanvasState(serializeCanvas(canvas));
+        if (remoteHash === localHash) {
+          lastCanvasHashRef.current = remoteHash;
           pendingCanvasPersistRef.current = null;
           pendingCanvasMutationsRef.current.clear();
-        }
-        logCanvasSync('remote:skip:lastHash');
-        markHydrated();
-        return;
-      }
-
-      const localHash = stringifyCanvasState(serializeCanvas(canvas));
-      if (remoteHash === localHash) {
-        lastCanvasHashRef.current = remoteHash;
-        pendingCanvasPersistRef.current = null;
-        pendingCanvasMutationsRef.current.clear();
-        logCanvasSync('remote:skip:matchesLocal');
-        markHydrated();
-        return;
-      }
-
-      const pendingLocalHash = pendingCanvasPersistRef.current?.hash ?? null;
-      const hasPendingMutations = pendingCanvasMutationsRef.current.size > 0;
-
-      if (pendingLocalHash !== null || hasPendingMutations) {
-        logCanvasSync('remote:defer:pendingLocal', {
-          pendingHash: pendingLocalHash,
-          hasPendingMutations,
-          pendingMutationCount: pendingCanvasMutationsRef.current.size,
-        });
-        markHydrated();
-        return;
-      }
-
-      logCanvasSync('remote:applyToCanvas', {
-        boardId,
-        remoteObjects: normalizedState.objects.length,
-      });
-      isApplyingRemoteCanvasRef.current = true;
-      void canvas
-        .loadFromJSON(normalizedState as unknown as Record<string, unknown>)
-        .then(() => {
-          canvas.discardActiveObject();
-          canvas.requestRenderAll();
-          lastCanvasHashRef.current = remoteHash;
-        })
-        .catch((error) => {
-          console.error('Error loading remote canvas state:', error);
-        })
-        .finally(() => {
-          isApplyingRemoteCanvasRef.current = false;
+          logCanvasSync('remote:skip:matchesLocal');
           markHydrated();
+          return;
+        }
+
+        const pendingLocalHash = pendingCanvasPersistRef.current?.hash ?? null;
+        const hasPendingMutations = pendingCanvasMutationsRef.current.size > 0;
+
+        if (pendingLocalHash !== null || hasPendingMutations) {
+          logCanvasSync('remote:defer:pendingLocal', {
+            pendingHash: pendingLocalHash,
+            hasPendingMutations,
+            pendingMutationCount: pendingCanvasMutationsRef.current.size,
+          });
+          markHydrated();
+          return;
+        }
+
+        logCanvasSync('remote:applyToCanvas', {
+          boardId,
+          remoteObjects: normalizedState.objects.length,
         });
-    });
+        isApplyingRemoteCanvasRef.current = true;
+        void canvas
+          .loadFromJSON(normalizedState as unknown as Record<string, unknown>)
+          .then(() => {
+            canvas.discardActiveObject();
+            canvas.requestRenderAll();
+            lastCanvasHashRef.current = remoteHash;
+          })
+          .catch((error) => {
+            console.error('Error loading remote canvas state:', error);
+          })
+          .finally(() => {
+            isApplyingRemoteCanvasRef.current = false;
+            markHydrated();
+          });
+      },
+      (error) => {
+        if (isCancelled) {
+          return;
+        }
+        console.error('Error subscribing to board canvas:', error);
+        markHydrated();
+      }
+    );
 
     return () => {
       isCancelled = true;
@@ -1217,10 +1234,18 @@ export function Canvas() {
     if (!boardId) {
       return;
     }
-    return subscribeToPresence(boardId, setPresenceByUser);
+    return subscribeToPresence(
+      boardId,
+      setPresenceByUser,
+      (error) => {
+        console.error('Error subscribing to board presence:', error);
+      }
+    );
   }, [boardId]);
 
   useEffect(() => {
+    hasInitializedPresenceRef.current = false;
+
     if (!canvas || !boardId || !syncUserId) {
       return;
     }
@@ -1244,7 +1269,20 @@ export function Canvas() {
       },
     };
 
-    void updatePresence(boardId, localPresenceSessionId, initialPresence);
+    void updatePresence(boardId, localPresenceSessionId, initialPresence)
+      .then(() => {
+        if (isDisposed) {
+          return;
+        }
+        hasInitializedPresenceRef.current = true;
+      })
+      .catch((error) => {
+        if (isDisposed) {
+          return;
+        }
+        hasInitializedPresenceRef.current = false;
+        logPresenceSyncError('initial update', error);
+      });
     lastCursorSentAtRef.current = 0;
     lastCursorSentRef.current = null;
     queuedCursorRef.current = null;
@@ -1253,7 +1291,7 @@ export function Canvas() {
     isLocalDrawingRef.current = false;
 
     const flushCursor = () => {
-      if (isDisposed || !queuedCursorRef.current) {
+      if (isDisposed || !queuedCursorRef.current || !hasInitializedPresenceRef.current) {
         return;
       }
 
@@ -1270,6 +1308,8 @@ export function Canvas() {
       void updatePresenceFields(boardId, localPresenceSessionId, {
         cursor: nextCursor,
         isActive: true,
+      }).catch((error) => {
+        logPresenceSyncError('cursor update', error);
       });
     };
 
@@ -1297,7 +1337,7 @@ export function Canvas() {
     };
 
     const flushDrawingTrail = () => {
-      if (isDisposed || !isLocalDrawingRef.current) {
+      if (isDisposed || !isLocalDrawingRef.current || !hasInitializedPresenceRef.current) {
         return;
       }
 
@@ -1314,6 +1354,8 @@ export function Canvas() {
           trail,
           updatedAt: Date.now(),
         },
+      }).catch((error) => {
+        logPresenceSyncError('drawing activity update', error);
       });
     };
 
@@ -1400,6 +1442,10 @@ export function Canvas() {
         drawingFlushTimerRef.current = null;
       }
 
+      if (!hasInitializedPresenceRef.current) {
+        return;
+      }
+
       void updatePresenceFields(boardId, localPresenceSessionId, {
         activity: {
           tool: activeToolRef.current,
@@ -1407,6 +1453,8 @@ export function Canvas() {
           trail: [],
           updatedAt: Date.now(),
         },
+      }).catch((error) => {
+        logPresenceSyncError('pen stop update', error);
       });
     };
 
@@ -1427,7 +1475,24 @@ export function Canvas() {
             trail: [],
             updatedAt: Date.now(),
           },
-        });
+        })
+          .then(() => {
+            if (isDisposed) {
+              return;
+            }
+            hasInitializedPresenceRef.current = true;
+          })
+          .catch((error) => {
+            if (isDisposed) {
+              return;
+            }
+            hasInitializedPresenceRef.current = false;
+            logPresenceSyncError('visibility active update', error);
+          });
+        return;
+      }
+
+      if (!hasInitializedPresenceRef.current) {
         return;
       }
 
@@ -1439,6 +1504,8 @@ export function Canvas() {
           trail: [],
           updatedAt: Date.now(),
         },
+      }).catch((error) => {
+        logPresenceSyncError('visibility inactive update', error);
       });
     };
 
@@ -1451,6 +1518,7 @@ export function Canvas() {
 
     return () => {
       isDisposed = true;
+      hasInitializedPresenceRef.current = false;
       canvas.off('mouse:move', handlePointerActivity);
       canvas.off('mouse:down', handlePointerActivity);
       canvas.off('mouse:up', handlePointerActivity);
@@ -1467,7 +1535,9 @@ export function Canvas() {
         drawingFlushTimerRef.current = null;
       }
 
-      void removePresence(boardId, localPresenceSessionId);
+      void removePresence(boardId, localPresenceSessionId).catch((error) => {
+        logPresenceSyncError('presence cleanup', error);
+      });
     };
   }, [
     boardId,
