@@ -13,7 +13,7 @@ import {
   linkWithPopup,
   updateProfile,
   User as FirebaseUser,
-  onAuthStateChanged,
+  onIdTokenChanged,
   UserCredential,
 } from 'firebase/auth';
 import { FirebaseError } from 'firebase/app';
@@ -240,12 +240,9 @@ async function migrateAnonymousUserIntoExistingGoogleAccount(
     sourceSnapshot,
     boardIdsToMigrate
   );
-
-  try {
-    await anonymousUser.delete();
-  } catch (deleteError) {
-    console.warn('Unable to delete anonymous user after migration:', deleteError);
-  }
+  // Do not delete the anonymous auth account here.
+  // In credential-already-in-use migrations we switch sessions mid-flight,
+  // and deleting the previous user can trigger auth-state churn in some clients.
 
   return googleCredential;
 }
@@ -392,7 +389,9 @@ export function convertFirebaseUser(firebaseUser: FirebaseUser | null): User | n
 export function onAuthStateChange(callback: (user: User | null) => void): () => void {
   let eventVersion = 0;
 
-  return onAuthStateChanged(auth, (firebaseUser) => {
+  // onIdTokenChanged also fires on provider-link/token changes where uid is unchanged
+  // (anonymous -> Google link), preventing stale "guest" UI state.
+  return onIdTokenChanged(auth, (firebaseUser) => {
     const currentVersion = eventVersion + 1;
     eventVersion = currentVersion;
 
