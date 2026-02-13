@@ -1,11 +1,13 @@
 import {
   AuthCredential,
+  browserLocalPersistence,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut as firebaseSignOut,
   signInAnonymously,
   signInWithPopup,
   signInWithCredential,
+  setPersistence,
   getAuth as getAuthForApp,
   GoogleAuthProvider,
   linkWithPopup,
@@ -29,6 +31,27 @@ import {
   UserProfileSeed,
 } from './userStore';
 import { transferBoardOwnership } from './database';
+
+let authPersistencePromise: Promise<void> | null = null;
+
+interface LoginWithGoogleOptions {
+  boardIdToMigrate?: string | null;
+}
+
+export async function ensureAuthPersistence(): Promise<void> {
+  if (!authPersistencePromise) {
+    authPersistencePromise = setPersistence(auth, browserLocalPersistence)
+      .catch((error) => {
+        console.warn(
+          'Unable to enable local Firebase auth persistence. Continuing with default behavior.',
+          error
+        );
+      })
+      .then(() => undefined);
+  }
+
+  await authPersistencePromise;
+}
 
 function getStableIndexFromString(value: string, modulo: number): number {
   if (modulo <= 0) {
@@ -126,6 +149,17 @@ function convertFirebaseUserWithDefaults(firebaseUser: FirebaseUser): User {
   return applyStoredProfile(firebaseUser, cachedProfile, fallbackUser);
 }
 
+function normalizeBoardIdCandidates(candidates: Array<string | null | undefined>): string[] {
+  return Array.from(
+    new Set(
+      candidates.filter(
+        (candidate): candidate is string =>
+          typeof candidate === 'string' && candidate.trim().length > 0
+      )
+    )
+  );
+}
+
 async function convertFirebaseUserWithProfile(
   firebaseUser: FirebaseUser | null
 ): Promise<User | null> {
@@ -133,12 +167,27 @@ async function convertFirebaseUserWithProfile(
     return null;
   }
 
-  const seed = toUserProfileSeed(firebaseUser, {
-    isAnonymous: firebaseUser.isAnonymous,
-  });
-  await ensureUserProfileInFirestore(firebaseUser.uid, seed);
+  // Read-only: do not call ensureUserProfileInFirestore here.
+  // Profile creation/updates are handled by the sign-in functions
+  // (loginAnonymously, loginWithGoogle, loginWithEmail, etc.).
+  // Writing here would race with migrateAnonymousUserIntoExistingGoogleAccount
+  // and overwrite merged board data during account migration.
   const storedProfile = await getFullUserFromFirestore(firebaseUser.uid);
   return applyStoredProfile(firebaseUser, storedProfile);
+}
+
+async function syncUserProfileInFirestoreSafely(
+  firebaseUser: FirebaseUser,
+  overrides: Partial<UserProfileSeed> = {}
+): Promise<void> {
+  try {
+    await ensureUserProfileInFirestore(firebaseUser.uid, toUserProfileSeed(firebaseUser, overrides));
+  } catch (error) {
+    console.warn(
+      'Unable to persist user profile in Firestore. Keeping authentication session active.',
+      error
+    );
+  }
 }
 
 async function resolveUserIdForCredential(credential: AuthCredential): Promise<string> {
@@ -162,15 +211,20 @@ async function resolveUserIdForCredential(credential: AuthCredential): Promise<s
 
 async function migrateAnonymousUserIntoExistingGoogleAccount(
   anonymousUser: FirebaseUser,
-  credential: AuthCredential
+  credential: AuthCredential,
+  fallbackBoardIds: string[] = []
 ): Promise<UserCredential> {
   const anonymousUserId = anonymousUser.uid;
   const sourceSnapshot = await getFullUserFromFirestore(anonymousUserId);
   const sourceBoards = sourceSnapshot?.createdBoards ?? [];
+  const boardIdsToMigrate = normalizeBoardIdCandidates([
+    ...sourceBoards,
+    ...fallbackBoardIds,
+  ]);
   const targetUserId = await resolveUserIdForCredential(credential);
 
-  if (sourceBoards.length > 0) {
-    await transferBoardOwnership(anonymousUserId, targetUserId, sourceBoards);
+  if (boardIdsToMigrate.length > 0) {
+    await transferBoardOwnership(anonymousUserId, targetUserId, boardIdsToMigrate);
   }
 
   await deleteUserDataFromStores(anonymousUserId);
@@ -183,7 +237,8 @@ async function migrateAnonymousUserIntoExistingGoogleAccount(
   await mergeImportedUserDataIntoAccount(
     googleCredential.user.uid,
     googleSeed,
-    sourceSnapshot
+    sourceSnapshot,
+    boardIdsToMigrate
   );
 
   try {
@@ -198,24 +253,23 @@ async function migrateAnonymousUserIntoExistingGoogleAccount(
 export async function loginWithEmail(
   credentials: LoginCredentials
 ): Promise<UserCredential> {
+  await ensureAuthPersistence();
   const userCredential = await signInWithEmailAndPassword(
     auth,
     credentials.email,
     credentials.password
   );
-  await ensureUserProfileInFirestore(
-    userCredential.user.uid,
-    toUserProfileSeed(userCredential.user, {
-      email: userCredential.user.email ?? credentials.email,
-      isAnonymous: false,
-    })
-  );
+  await syncUserProfileInFirestoreSafely(userCredential.user, {
+    email: userCredential.user.email ?? credentials.email,
+    isAnonymous: false,
+  });
   return userCredential;
 }
 
 export async function signupWithEmail(
   credentials: SignupCredentials
 ): Promise<UserCredential> {
+  await ensureAuthPersistence();
   const userCredential = await createUserWithEmailAndPassword(
     auth,
     credentials.email,
@@ -229,7 +283,7 @@ export async function signupWithEmail(
   const emoji = getRandomEmoji();
   const color = getRandomColor();
 
-  await createUserProfile(userCredential.user.uid, {
+  await syncUserProfileInFirestoreSafely(userCredential.user, {
     email: credentials.email,
     displayName: credentials.displayName,
     emoji,
@@ -241,31 +295,30 @@ export async function signupWithEmail(
 }
 
 export async function loginAnonymously(): Promise<UserCredential> {
+  await ensureAuthPersistence();
   const userCredential = await signInAnonymously(auth);
 
-  await ensureUserProfileInFirestore(
-    userCredential.user.uid,
-    toUserProfileSeed(userCredential.user, {
-      email: null,
-      isAnonymous: true,
-    })
-  );
+  await syncUserProfileInFirestoreSafely(userCredential.user, {
+    email: null,
+    isAnonymous: true,
+  });
 
   return userCredential;
 }
 
-export async function loginWithGoogle(): Promise<UserCredential> {
+export async function loginWithGoogle(
+  options: LoginWithGoogleOptions = {}
+): Promise<UserCredential> {
+  await ensureAuthPersistence();
   const provider = new GoogleAuthProvider();
   const currentUser = auth.currentUser;
+  const boardIdsToMigrate = normalizeBoardIdCandidates([options.boardIdToMigrate]);
   if (currentUser?.isAnonymous) {
     try {
       const linkedCredential = await linkWithPopup(currentUser, provider);
-      await ensureUserProfileInFirestore(
-        linkedCredential.user.uid,
-        toUserProfileSeed(linkedCredential.user, {
-          isAnonymous: false,
-        })
-      );
+      await syncUserProfileInFirestoreSafely(linkedCredential.user, {
+        isAnonymous: false,
+      });
       return linkedCredential;
     } catch (linkError) {
       if (!isAccountAlreadyLinkedError(linkError)) {
@@ -279,20 +332,41 @@ export async function loginWithGoogle(): Promise<UserCredential> {
         );
       }
 
-      return migrateAnonymousUserIntoExistingGoogleAccount(
-        currentUser,
-        credentialFromError
-      );
+      try {
+        return await migrateAnonymousUserIntoExistingGoogleAccount(
+          currentUser,
+          credentialFromError,
+          boardIdsToMigrate
+        );
+      } catch (migrationError) {
+        if (boardIdsToMigrate.length > 0) {
+          console.warn(
+            'Unable to migrate anonymous board data to the selected Google account.',
+            migrationError
+          );
+          throw new Error(
+            'Unable to migrate this board to your Google account. Please try again.'
+          );
+        }
+
+        console.warn(
+          'Unable to migrate anonymous user data to the existing Google account. Proceeding with Google sign-in.',
+          migrationError
+        );
+
+        const fallbackGoogleCredential = await signInWithCredential(auth, credentialFromError);
+        await syncUserProfileInFirestoreSafely(fallbackGoogleCredential.user, {
+          isAnonymous: false,
+        });
+        return fallbackGoogleCredential;
+      }
     }
   }
 
   const googleCredential = await signInWithPopup(auth, provider);
-  await ensureUserProfileInFirestore(
-    googleCredential.user.uid,
-    toUserProfileSeed(googleCredential.user, {
-      isAnonymous: false,
-    })
-  );
+  await syncUserProfileInFirestoreSafely(googleCredential.user, {
+    isAnonymous: false,
+  });
   return googleCredential;
 }
 

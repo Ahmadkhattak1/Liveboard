@@ -409,6 +409,11 @@ export default function HomePage() {
       } else {
         await loginWithGoogle();
       }
+      // Sign-in (and any account migration) is now complete.
+      // Reset activeUserId so the useEffect triggers a fresh loadBoards.
+      // This is needed because onAuthStateChanged may have fired mid-migration
+      // and loaded stale board data before the merge finished.
+      setActiveUserId(null);
     } catch (signInError: unknown) {
       console.error('Authentication error:', signInError);
       setError(parseErrorMessage(signInError, 'Failed to authenticate user'));

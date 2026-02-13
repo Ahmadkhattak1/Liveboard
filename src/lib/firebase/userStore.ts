@@ -73,6 +73,10 @@ function isOfflineLikeError(error: unknown): boolean {
   return isFirestoreOfflineError(error) || isTimeoutError(error);
 }
 
+function isPermissionDeniedError(error: unknown): boolean {
+  return error instanceof FirebaseError && error.code === 'permission-denied';
+}
+
 function isOfflineNoCacheError(error: unknown): boolean {
   return error instanceof Error && error.message === OFFLINE_NO_CACHE_ERROR;
 }
@@ -330,6 +334,11 @@ async function migrateLegacyRealtimeUser(userId: string): Promise<StoredUserDocu
       return readCachedUser(userId);
     }
 
+    if (isPermissionDeniedError(error)) {
+      // Legacy users/* RTDB reads are optional once Firestore is the source of truth.
+      return null;
+    }
+
     throw error;
   }
 }
@@ -453,12 +462,20 @@ export async function removeCreatedBoardFromUser(userId: string, boardId: string
 export async function mergeImportedUserDataIntoAccount(
   targetUserId: string,
   targetSeed: UserProfileSeed,
-  sourceUserData: UserRecordSnapshot | null
+  sourceUserData: UserRecordSnapshot | null,
+  additionalBoardIds: string[] = []
 ): Promise<string[]> {
   const targetUser = await getOrMigrateUser(targetUserId);
   const sourceBoards = sourceUserData?.createdBoards ?? [];
+  const importedBoards = Array.from(
+    new Set(
+      [...sourceBoards, ...additionalBoardIds].filter(
+        (boardId): boardId is string => typeof boardId === 'string' && boardId.length > 0
+      )
+    )
+  );
   const targetBoards = targetUser?.createdBoards ?? [];
-  const mergedBoards = Array.from(new Set([...targetBoards, ...sourceBoards]));
+  const mergedBoards = Array.from(new Set([...targetBoards, ...importedBoards]));
   const now = Date.now();
 
   const mergedTargetUser: StoredUserDocument = {
@@ -476,7 +493,7 @@ export async function mergeImportedUserDataIntoAccount(
   };
 
   await upsertFirestoreUser(mergedTargetUser);
-  return sourceBoards;
+  return importedBoards;
 }
 
 export async function getFullUserFromFirestore(
@@ -522,7 +539,7 @@ export async function deleteUserDataFromStores(userId: string): Promise<void> {
       await removeRealtimeUser(userId);
     }
   } catch (error) {
-    if (!isOfflineLikeError(error)) {
+    if (!isOfflineLikeError(error) && !isPermissionDeniedError(error)) {
       throw error;
     }
   }

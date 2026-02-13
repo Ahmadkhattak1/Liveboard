@@ -1,8 +1,8 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User, AuthState } from '@/types/user';
-import { onAuthStateChange, convertFirebaseUser, getCurrentUser } from '@/lib/firebase/auth';
+import { AuthState } from '@/types/user';
+import { ensureAuthPersistence, onAuthStateChange, getCurrentUser } from '@/lib/firebase/auth';
 
 interface AuthContextType extends AuthState {
   refreshUser: () => void;
@@ -18,15 +18,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   });
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChange((user) => {
-      setAuthState({
-        user,
-        loading: false,
-        error: null,
+    let unsubscribe = () => {};
+    let isUnmounted = false;
+
+    void ensureAuthPersistence().then(() => {
+      if (isUnmounted) {
+        return;
+      }
+
+      unsubscribe = onAuthStateChange((user) => {
+        setAuthState({
+          user,
+          loading: false,
+          error: null,
+        });
       });
     });
 
-    return () => unsubscribe();
+    return () => {
+      isUnmounted = true;
+      unsubscribe();
+    };
   }, []);
 
   const refreshUser = () => {

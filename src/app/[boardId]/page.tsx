@@ -144,7 +144,9 @@ function BoardView() {
     setShareError(null);
 
     try {
-      await loginWithGoogle();
+      await loginWithGoogle({
+        boardIdToMigrate: board?.metadata.id ?? null,
+      });
       setShowShareSigninPrompt(false);
       setShareError(null);
 
